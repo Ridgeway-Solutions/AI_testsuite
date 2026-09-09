@@ -174,6 +174,7 @@ class Attempt:
     response: Response
     verdicts: list[Verdict] = field(default_factory=list)
     severity: Severity = Severity.MEDIUM
+    category: str = "generic"
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     started_at: float = field(default_factory=time.time)
     variant: str = ""
@@ -209,6 +210,7 @@ class Attempt:
             "fingerprint": self.fingerprint,
             "attack": self.attack_id,
             "objective": self.objective_id,
+            "category": self.category,
             "variant": self.variant,
             "severity": self.severity.value,
             "success": self.success,

@@ -7,9 +7,6 @@ import random
 import re
 import time
 import unicodedata
-from typing import Awaitable, Callable, TypeVar
-
-T = TypeVar("T")
 
 
 class RateLimiter:
@@ -36,30 +33,6 @@ class RateLimiter:
                     self._tokens -= 1
                     return
                 await asyncio.sleep((1 - self._tokens) / self.rps)
-
-
-async def retry_async(
-    fn: Callable[[], Awaitable[T]],
-    *,
-    attempts: int = 3,
-    base_delay: float = 1.0,
-    max_delay: float = 16.0,
-    retry_on: Callable[[BaseException], bool] = lambda e: True,
-) -> T:
-    """Exponential backoff with full jitter."""
-    last: BaseException | None = None
-    for i in range(attempts):
-        try:
-            return await fn()
-        except asyncio.CancelledError:
-            raise
-        except BaseException as exc:  # noqa: BLE001 - re-raised below
-            if not retry_on(exc) or i == attempts - 1:
-                raise
-            last = exc
-            delay = min(max_delay, base_delay * (2**i))
-            await asyncio.sleep(random.uniform(0, delay))
-    raise last  # pragma: no cover - unreachable
 
 
 _WS = re.compile(r"\s+")

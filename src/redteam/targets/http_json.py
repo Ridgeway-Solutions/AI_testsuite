@@ -23,7 +23,15 @@ from typing import Any
 
 from ..registry import register_target
 from ..types import Conversation, Response
-from .base import CAP_MULTI_TURN, CAP_SYSTEM_PROMPT, Target, dig, error_response, http_post_json
+from .base import (
+    CAP_MULTI_TURN,
+    CAP_SEEDING,
+    CAP_SYSTEM_PROMPT,
+    Target,
+    dig,
+    error_response,
+    http_post_json,
+)
 
 
 @register_target("http")
@@ -38,7 +46,9 @@ class HttpJsonTarget(Target):
         self.blocked_path = options.get("blocked_path")
         self.timeout = options.get("timeout", 60.0)
         if options.get("supports_system_prompt"):
-            self.capabilities = self.capabilities | {CAP_SYSTEM_PROMPT}
+            # If the endpoint takes our system prompt, we can seed a canary into
+            # it — so the confidentiality objectives become testable here.
+            self.capabilities = self.capabilities | {CAP_SYSTEM_PROMPT, CAP_SEEDING}
 
     async def send(self, conversation: Conversation) -> Response:
         messages = self._with_system(conversation)

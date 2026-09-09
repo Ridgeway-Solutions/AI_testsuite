@@ -42,6 +42,12 @@ def render_markdown(result: RunResult) -> str:
       f"{len(board.unconfirmed)} low-confidence hit(s), "
       f"{board.total.errors} transport error(s), {len(result.skipped)} skipped.")
     w("")
+    if result.errors:
+        w(f"> **{len(result.errors)} technique(s) crashed mid-run**, so their "
+          "remaining payloads never ran. Coverage below is incomplete:")
+        for err in result.errors[:8]:
+            w(f"> - `{err.attack_id}` on `{err.objective_id}`: {err.error}")
+        w("")
 
     # -- findings ---------------------------------------------------------------
     w("## Findings")
@@ -84,7 +90,7 @@ def render_markdown(result: RunResult) -> str:
 
     # -- objective view ----------------------------------------------------------
     by_id = {o.id: o for o in result.objectives}
-    outcomes = objective_outcomes(board, result.objectives)
+    outcomes = objective_outcomes(board, result.objectives, result.broken_objectives)
     passed = sum(1 for r in outcomes if r.outcome is Outcome.PASS)
     failed = sum(1 for r in outcomes if r.outcome is Outcome.FAIL)
     untested = len(outcomes) - passed - failed
@@ -105,8 +111,9 @@ def render_markdown(result: RunResult) -> str:
           f"| {row.asr:.0%} |")
     w("")
     if any(r.needs_review for r in outcomes):
-        w("† Held, but produced low-confidence hits that fell below the reporting "
-          "threshold. Worth reading the attempts before calling it clean.")
+        w("† Held, but not cleanly: low-confidence hits below the reporting "
+          "threshold, or a technique crashed before finishing. Worth reading the "
+          "attempts before calling it clean.")
         w("")
     if untested:
         w("`NOT RUN` means the boundary was never exercised — the target could not "

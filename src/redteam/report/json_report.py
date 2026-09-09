@@ -11,7 +11,7 @@ from ..scoring import Outcome, objective_outcomes
 
 def build(result: RunResult) -> dict[str, Any]:
     board = result.scoreboard()
-    outcomes = objective_outcomes(board, result.objectives)
+    outcomes = objective_outcomes(board, result.objectives, result.broken_objectives)
     return {
         "schema": "redteam-suite/run/1",
         "suite": {
@@ -38,6 +38,7 @@ def build(result: RunResult) -> dict[str, Any]:
                      for a in board.findings],
         "unconfirmed": [a.to_dict(include_payload=False) for a in board.unconfirmed],
         "skipped": [s.to_dict() for s in result.skipped],
+        "errors": [e.to_dict() for e in result.errors],
         "attempts": len(result.attempts),
     }
 

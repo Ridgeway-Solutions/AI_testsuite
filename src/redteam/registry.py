@@ -7,7 +7,9 @@ config loader resolve them by string id so suites stay declarative YAML.
 from __future__ import annotations
 
 import importlib
+import os
 import pkgutil
+import sys
 from typing import Any, Callable, Iterable, TypeVar
 
 _REGISTRIES: dict[str, dict[str, Any]] = {"attack": {}, "target": {}, "detector": {}}
@@ -66,5 +68,20 @@ def load_plugins(extra_modules: Iterable[str] = ()) -> None:
                 if not mod.name.startswith("_"):
                     importlib.import_module(f"redteam.{sub}.{mod.name}")
         _loaded = True
-    for name in extra_modules:
-        importlib.import_module(name)
+    extra = list(extra_modules)
+    if extra:
+        # A suite's `plugins:` entries are normally modules sitting next to it
+        # in the project, which are not importable from an installed console
+        # script unless the working directory is on the path.
+        cwd = os.getcwd()
+        if cwd not in sys.path:
+            sys.path.insert(0, cwd)
+    for name in extra:
+        try:
+            importlib.import_module(name)
+        except ImportError as exc:
+            raise ImportError(
+                f"could not import plugin module {name!r}: {exc}. "
+                "Plugin modules are imported relative to the working directory "
+                "or from anywhere on PYTHONPATH."
+            ) from None

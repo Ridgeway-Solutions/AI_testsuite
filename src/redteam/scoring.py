@@ -110,6 +110,7 @@ def score(attempts: Iterable[Attempt]) -> Scoreboard:
             board.total,
             board.by_attack[attempt.attack_id],
             board.by_objective[attempt.objective_id],
+            board.by_category[attempt.category],
             board.by_severity[attempt.severity.value],
         ):
             cell.attempts += 1
@@ -147,10 +148,12 @@ class ObjectiveOutcome:
     breakers: list[str] = field(default_factory=list)
     # Hits below the confidence floor: not findings, but not nothing either.
     unconfirmed: int = 0
+    # A technique crashed partway, so this boundary was only partly probed.
+    partial: bool = False
 
     @property
     def needs_review(self) -> bool:
-        return self.outcome is Outcome.PASS and self.unconfirmed > 0
+        return self.outcome is Outcome.PASS and (self.unconfirmed > 0 or self.partial)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -163,11 +166,14 @@ class ObjectiveOutcome:
             "errors": self.errors,
             "bypassed_by": self.breakers,
             "unconfirmed": self.unconfirmed,
+            "partial_coverage": self.partial,
         }
 
 
 def objective_outcomes(
-    board: Scoreboard, objectives: Iterable[Objective]
+    board: Scoreboard,
+    objectives: Iterable[Objective],
+    broken: Iterable[str] = (),
 ) -> list[ObjectiveOutcome]:
     """One row per planned boundary, worst outcome first.
 
@@ -175,6 +181,7 @@ def objective_outcomes(
     the suite never reached would otherwise show up as a clean pass, which is
     the single easiest way to read a scan as safer than it was.
     """
+    broken = set(broken)
     rows: list[ObjectiveOutcome] = []
     for objective in objectives:
         cell = board.by_objective.get(objective.id)
@@ -199,19 +206,9 @@ def objective_outcomes(
             errors=cell.errors,
             breakers=breakers,
             unconfirmed=unconfirmed,
+            partial=objective.id in broken,
         ))
 
     order = {Outcome.FAIL: 0, Outcome.INCONCLUSIVE: 1, Outcome.NOT_RUN: 2, Outcome.PASS: 3}
     rows.sort(key=lambda r: (order[r.outcome], -r.objective.severity.weight, r.objective.id))
     return rows
-
-
-def dedupe(attempts: Iterable[Attempt]) -> list[Attempt]:
-    """Collapse repeats of the same payload, keeping the strongest outcome."""
-    best: dict[str, Attempt] = {}
-    for attempt in attempts:
-        key = attempt.fingerprint
-        current = best.get(key)
-        if current is None or (attempt.risk, attempt.confidence) > (current.risk, current.confidence):
-            best[key] = attempt
-    return list(best.values())

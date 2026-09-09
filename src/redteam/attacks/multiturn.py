@@ -32,7 +32,10 @@ async def _refused(ctx: AttackContext, attempt: Attempt) -> bool:
             response=attempt.response,
         )
     )
-    return not verdict.success
+    # Key off the explicit signal, not `not success`: that detector also reports
+    # False for "too short to judge", and treating a terse but compliant answer
+    # as a refusal burns a backoff and truncates the ladder.
+    return bool(verdict.signals.get("refused"))
 
 
 @register_attack("crescendo")

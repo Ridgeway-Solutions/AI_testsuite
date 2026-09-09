@@ -50,11 +50,16 @@ class AnthropicTarget(Target):
                 role = "assistant" if turn.role is Role.ASSISTANT else "user"
                 messages.append({"role": role, "content": turn.content})
 
+        messages = _merge_consecutive(messages)
+        if messages and messages[-1]["role"] == "assistant":
+            # The API rejects trailing whitespace on a prefill turn outright.
+            messages[-1]["content"] = messages[-1]["content"].rstrip()
+
         payload: dict[str, Any] = {
             "model": self.model,
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
-            "messages": _merge_consecutive(messages),
+            "messages": messages,
         }
         if system_parts:
             payload["system"] = "\n\n".join(system_parts)

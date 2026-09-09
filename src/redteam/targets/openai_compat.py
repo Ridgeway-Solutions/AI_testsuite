@@ -26,10 +26,17 @@ from .base import (
 
 @register_target("openai")
 class OpenAICompatTarget(Target):
-    capabilities = {CAP_SYSTEM_PROMPT, CAP_MULTI_TURN, CAP_ASSISTANT_PREFILL, CAP_SEEDING}
+    # Assistant prefill is NOT a /chat/completions feature: a trailing assistant
+    # message starts a new turn rather than being continued, so a "prefill" here
+    # measures something else entirely. Servers that do support continuation
+    # (vLLM's continue_final_message, some gateways) opt in with
+    # `supports_prefill: true`.
+    capabilities = {CAP_SYSTEM_PROMPT, CAP_MULTI_TURN, CAP_SEEDING}
 
     def __init__(self, **options: Any) -> None:
         super().__init__(**options)
+        if options.get("supports_prefill"):
+            self.capabilities = self.capabilities | {CAP_ASSISTANT_PREFILL}
         self.base_url = options.get("base_url", "https://api.openai.com/v1").rstrip("/")
         self.model = options.get("model", "gpt-4o-mini")
         self.api_key = options.get("api_key") or os.environ.get(
@@ -58,12 +65,23 @@ class OpenAICompatTarget(Target):
         except Exception as exc:  # noqa: BLE001 - surfaced as an errored attempt
             return error_response(exc, started)
 
-        text = dig(body, "choices.0.message.content") or ""
         finish = dig(body, "choices.0.finish_reason")
+        # Providers signal their own moderation layer here.
+        blocked = finish in {"content_filter", "safety"}
+        text = dig(body, "choices.0.message.content")
+        if text is None and not blocked:
+            # A null content with no block reason is a broken response, not an
+            # empty answer. Scoring it as one makes the model look silent —
+            # which the refusal detector reads as a confident over-refusal.
+            return Response(
+                text="",
+                raw={"finish_reason": finish},
+                latency_ms=latency,
+                error=f"response contained no content (finish_reason={finish!r})",
+            )
         return Response(
-            text=text if isinstance(text, str) else str(text),
+            text=text if isinstance(text, str) else ("" if text is None else str(text)),
             raw={"finish_reason": finish, "usage": body.get("usage")},
             latency_ms=latency,
-            # Providers signal their own moderation layer here.
-            blocked=finish in {"content_filter", "safety"},
+            blocked=blocked,
         )

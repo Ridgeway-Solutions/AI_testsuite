@@ -1,4 +1,4 @@
-from redteam.scoring import CONFIDENCE_FLOOR, dedupe, score
+from redteam.scoring import CONFIDENCE_FLOOR, score
 from redteam.types import Attempt, Conversation, Response, Role, Severity, Turn, Verdict
 
 
@@ -69,14 +69,6 @@ def test_breakdowns_cover_attack_objective_and_severity():
     assert board.by_attack["x"].successes == 1
     assert board.by_objective["y"].successes == 1
     assert board.by_severity["medium"].successes == 1
-
-
-def test_dedupe_keeps_the_strongest_outcome_for_a_repeated_payload():
-    weak = attempt(confidence=0.6)
-    strong = attempt(confidence=1.0)
-    assert weak.fingerprint == strong.fingerprint
-    kept = dedupe([weak, strong])
-    assert len(kept) == 1 and kept[0].confidence == 1.0
 
 
 def test_top_attacks_ranks_by_risk():

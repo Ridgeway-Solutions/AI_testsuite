@@ -22,6 +22,7 @@ from .objectives import filter_objectives, load_objectives
 from .registry import available, load_plugins
 from .report import write_reports
 from .runner import Runner, RunResult, build_target, select_attacks
+from .scoring import Outcome, objective_outcomes
 from .types import Severity
 
 SEVERITIES = ["info", "low", "medium", "high", "critical"]
@@ -62,6 +63,9 @@ def _progress(quiet: bool):
             elif state["n"] % 25 == 0:
                 print(f"  … {state['n']} attempts, {state['hits']} hits",
                       file=sys.stderr)
+        elif kind == "warning":
+            print(f"  warning: {payload['message']}: "
+                  f"{', '.join(payload.get('objectives', []))}", file=sys.stderr)
         elif kind == "attack_error":
             print(f"  ✗ {payload['attack']}/{payload['objective']}: {payload['error']}",
                   file=sys.stderr)
@@ -78,7 +82,13 @@ def _progress(quiet: bool):
 
 def _config_from_args(args: argparse.Namespace) -> SuiteConfig:
     config = SuiteConfig.load(args.suite) if args.suite else SuiteConfig()
-    if args.target_type:
+    if args.target_type and args.target_type != config.target.get("type"):
+        # Switching adapter: the old block's keys belong to a different shape,
+        # so keep nothing but say so rather than dropping settings silently.
+        dropped = sorted(k for k in config.target if k != "type")
+        if dropped and not getattr(args, "quiet", False):
+            print(f"note: --target-type {args.target_type} replaces the suite's "
+                  f"target block (dropping {', '.join(dropped)})", file=sys.stderr)
         config.target = {"type": args.target_type}
     for key in ("model", "base_url", "url", "profile", "system_prompt", "api_key_env"):
         value = getattr(args, key, None)
@@ -129,16 +139,38 @@ def cmd_run(args: argparse.Namespace) -> int:
         for path in written:
             print(f"  report: {path}", file=sys.stderr)
 
-    threshold = SEVERITIES.index(args.fail_on) if args.fail_on else None
-    if threshold is not None:
-        breaching = [
-            a for a in board.findings if SEVERITIES.index(a.severity.value) >= threshold
-        ]
-        if breaching:
-            if not args.quiet:
-                print(f"FAIL: {len(breaching)} finding(s) at or above "
-                      f"{args.fail_on}", file=sys.stderr)
-            return 1
+    if args.fail_on is None:
+        return 0
+
+    threshold = SEVERITIES.index(args.fail_on)
+    breaching = [
+        a for a in board.findings if SEVERITIES.index(a.severity.value) >= threshold
+    ]
+    if breaching:
+        if not args.quiet:
+            print(f"FAIL: {len(breaching)} finding(s) at or above {args.fail_on}",
+                  file=sys.stderr)
+        return 1
+
+    # A gate that only looks at findings passes a run that tested nothing — an
+    # unreachable target, a filter that matched no objectives, a crashed plugin.
+    # "No findings" and "no coverage" must not produce the same exit code.
+    outcomes = objective_outcomes(board, result.objectives, result.broken_objectives)
+    untested = [r for r in outcomes if r.outcome in (Outcome.NOT_RUN, Outcome.INCONCLUSIVE)]
+    if not args.allow_untested and (untested or result.errors or not outcomes):
+        if not args.quiet:
+            if not outcomes:
+                print("FAIL: the run tested no boundaries at all", file=sys.stderr)
+            if untested:
+                print(f"FAIL: {len(untested)} boundary/boundaries were never "
+                      f"exercised: {', '.join(r.objective.id for r in untested)}",
+                      file=sys.stderr)
+            if result.errors:
+                print(f"FAIL: {len(result.errors)} technique(s) crashed, leaving "
+                      "partial coverage", file=sys.stderr)
+            print("       (pass --allow-untested to gate on findings alone)",
+                  file=sys.stderr)
+        return 1
     return 0
 
 
@@ -296,7 +328,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--out", default="runs/latest", help="output directory")
     run.add_argument("--format", default="md,json,html", help="report formats")
     run.add_argument("--fail-on", choices=SEVERITIES,
-                     help="exit 1 when a finding at or above this severity is confirmed")
+                     help="exit 1 when a finding at or above this severity is "
+                          "confirmed, or when the run left boundaries untested")
+    run.add_argument("--allow-untested", action="store_true",
+                     help="with --fail-on, gate on findings alone and tolerate "
+                          "skipped, errored or crashed coverage")
     run.add_argument("--quiet", action="store_true")
     run.set_defaults(func=cmd_run)
 
@@ -327,6 +363,9 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("\ninterrupted", file=sys.stderr)
         return 130
+    except ImportError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     except (KeyError, ValueError, FileNotFoundError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

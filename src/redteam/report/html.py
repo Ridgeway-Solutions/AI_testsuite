@@ -158,7 +158,7 @@ def render_html(result: RunResult) -> str:
     w("</tbody></table></div>")
 
     # Objectives
-    outcomes = objective_outcomes(board, result.objectives)
+    outcomes = objective_outcomes(board, result.objectives, result.broken_objectives)
     passed = sum(1 for r in outcomes if r.outcome is Outcome.PASS)
     failed = sum(1 for r in outcomes if r.outcome is Outcome.FAIL)
     untested = len(outcomes) - passed - failed
@@ -211,6 +211,13 @@ def render_html(result: RunResult) -> str:
     w(f"<li>Techniques run: {len(board.by_attack)}</li>")
     w(f"<li>Objectives run: {len(board.by_objective)}</li>")
     w(f"<li>Transport errors: {board.total.errors}</li>")
+    if result.errors:
+        w(f"<li><b>Crashed techniques: {len(result.errors)}</b> — their remaining "
+          "payloads never ran, so coverage is incomplete<ul>")
+        for err in result.errors[:8]:
+            w(f"<li><code>{_e(err.attack_id)}</code> on "
+              f"<code>{_e(err.objective_id)}</code>: {_e(err.error)}</li>")
+        w("</ul></li>")
     if result.skipped:
         reasons: dict[str, int] = {}
         for s in result.skipped:

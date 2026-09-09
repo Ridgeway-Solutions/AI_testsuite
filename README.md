@@ -102,7 +102,14 @@ target:
     conversation_id: "{{session_id}}"
   response_path: data.reply
   blocked_path: data.guardrail_triggered
+  supports_system_prompt: true   # lets the harness seed a canary to hunt for
 ```
+
+Note that `prefill` needs a backend that continues a trailing assistant turn —
+Anthropic does, plain `/chat/completions` does not, so the `openai` adapter only
+claims it under `supports_prefill: true` (vLLM's `continue_final_message` and
+similar). Probes a target cannot support are skipped and reported, never scored
+as passes.
 
 Also available: `anthropic` (Messages API), `shell` (drive a CLI app), and
 `mock` (offline). Credentials come from the environment via `${VAR}` — nothing
@@ -219,8 +226,12 @@ the tests.
   with: { name: redteam-report, path: runs/ci }
 ```
 
-`--fail-on <severity>` exits 1 when a confirmed finding reaches that severity, 2
-on a configuration error, 0 otherwise. Start with `--fail-on critical` on the
+`--fail-on <severity>` exits 1 when a confirmed finding reaches that severity —
+**and also when the run left boundaries untested**, because "no findings" and
+"no coverage" must not share an exit code. An unreachable endpoint, a filter
+that matched no objectives, or a crashed technique all fail the gate. Pass
+`--allow-untested` to gate on findings alone. Exit 2 is a configuration error,
+0 otherwise. Start with `--fail-on critical` on the
 `quick` suite as a gate, and run `full` nightly.
 
 Non-determinism is real: model sampling means a technique that lands today may

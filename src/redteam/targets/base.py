@@ -15,7 +15,7 @@ import urllib.request
 from abc import ABC, abstractmethod
 from typing import Any
 
-from ..types import Conversation, Response, Role
+from ..types import Conversation, Response, Role, Turn
 
 # Capability flags an attack can require. A suite silently skips attacks whose
 # requirements the configured target cannot satisfy (reported as "skipped").
@@ -24,6 +24,11 @@ CAP_MULTI_TURN = "multi_turn"
 CAP_ASSISTANT_PREFILL = "assistant_prefill"
 CAP_TOOLS = "tools"
 CAP_SEEDING = "seeding"  # harness may inject its own system prompt / canary
+
+# Turn.meta is our own bookkeeping. Only these keys mean anything to a provider,
+# and only on a tool turn — everything else must be stripped before the request,
+# or strict APIs reject the whole call with a 400.
+PROVIDER_META_KEYS = frozenset({"name", "tool_call_id"})
 
 
 class TargetError(RuntimeError):
@@ -55,9 +60,21 @@ class Target(ABC):
 
     # -- helpers for subclasses -------------------------------------------------
 
+    def _message(self, turn: Turn) -> dict[str, Any]:
+        """One turn as a provider-shaped message.
+
+        ``Turn.meta`` is deliberately not passed through: it carries harness
+        bookkeeping that strict endpoints reject as an unknown property, which
+        would fail the request rather than test the target.
+        """
+        msg: dict[str, Any] = {"role": turn.role.value, "content": turn.content}
+        if turn.role is Role.TOOL and CAP_TOOLS in self.capabilities:
+            msg.update({k: v for k, v in turn.meta.items() if k in PROVIDER_META_KEYS})
+        return msg
+
     def _with_system(self, conversation: Conversation) -> list[dict[str, Any]]:
         """Conversation as provider-style dicts, with the configured system prompt."""
-        msgs = [t.to_dict() for t in conversation.turns]
+        msgs = [self._message(t) for t in conversation.turns]
         has_system = any(m["role"] == Role.SYSTEM.value for m in msgs)
         if self.system_prompt and not has_system:
             msgs.insert(0, {"role": Role.SYSTEM.value, "content": self.system_prompt})

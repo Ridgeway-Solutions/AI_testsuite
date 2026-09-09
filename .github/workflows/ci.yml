@@ -31,13 +31,27 @@ jobs:
           python-version: "3.12"
       - run: pip install -e .
 
-      - name: Full library against the deliberately vulnerable mock
-        run: redteam run suites/full.yaml --out runs/vulnerable --quiet
+      - name: Full library against the keyword-guardrail mock
+        run: redteam run suites/full.yaml --out runs/naive --quiet
 
-      - name: A hardened target must produce no findings
+      - name: A permissive target must produce findings
+        run: |
+          redteam run suites/full.yaml --profile vulnerable \
+            --out runs/vulnerable --quiet --format json
+          python -c "import json,sys; d=json.load(open('runs/vulnerable/report.json')); \
+            sys.exit(0 if d['summary']['findings'] else 'expected findings on a permissive target')"
+
+      - name: A hardened target must produce no findings, with full coverage
         run: |
           redteam run suites/full.yaml \
             --profile strict --out runs/strict --quiet --fail-on low
+
+      - name: An unreachable target must fail the gate, not pass it
+        run: |
+          if redteam run --target-type http --url http://127.0.0.1:9/x \
+               --attacks direct --out runs/unreachable --quiet --fail-on low; then
+            echo "gate passed a run that tested nothing"; exit 1
+          fi
 
       - uses: actions/upload-artifact@v4
         if: always()

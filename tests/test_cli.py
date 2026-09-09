@@ -99,3 +99,74 @@ def test_init_refuses_to_clobber_without_force(tmp_path):
 def test_the_authorisation_banner_is_printed_on_a_run(tmp_path, capsys):
     main(["run", "suites/quick.yaml", "--out", str(tmp_path), "--format", "json"])
     assert "authorised to test" in capsys.readouterr().err
+
+
+# -- the gate must not pass a run that tested nothing -------------------------
+
+
+def test_an_unknown_objective_id_is_a_config_error_not_an_empty_green_run(tmp_path, capsys):
+    """`--only typo` used to yield 0 pairs, grade "strong", exit 0 — a CI gate
+    passing on a scan that exercised nothing."""
+    code = main(["run", "--target-type", "mock", "--only", "bogus.id",
+                 "--out", str(tmp_path), "--quiet", "--format", "json"])
+    assert code == 2
+    assert "unknown objective" in capsys.readouterr().err
+
+
+def test_an_unmatched_category_is_a_config_error(tmp_path, capsys):
+    code = main(["run", "--target-type", "mock", "--category", "nonsense",
+                 "--out", str(tmp_path), "--quiet", "--format", "json"])
+    assert code == 2
+    assert "no objective matches" in capsys.readouterr().err
+
+
+def test_an_unreachable_target_fails_the_gate_instead_of_passing_it(tmp_path):
+    """Every boundary INCONCLUSIVE is not the same result as every boundary
+    holding, and must not share an exit code with it."""
+    code = main(["run", "--target-type", "http", "--url", "http://127.0.0.1:9/x",
+                 "--attacks", "direct", "--out", str(tmp_path), "--quiet",
+                 "--format", "json", "--fail-on", "low"])
+    assert code == 1
+
+
+def test_allow_untested_opts_back_into_findings_only_gating(tmp_path):
+    code = main(["run", "--target-type", "http", "--url", "http://127.0.0.1:9/x",
+                 "--attacks", "direct", "--out", str(tmp_path), "--quiet",
+                 "--format", "json", "--fail-on", "low", "--allow-untested"])
+    assert code == 0
+
+
+def test_full_coverage_with_no_findings_still_passes_the_gate(tmp_path):
+    code = main(["run", "suites/full.yaml", "--profile", "strict",
+                 "--out", str(tmp_path), "--quiet", "--format", "json",
+                 "--fail-on", "low"])
+    assert code == 0
+
+
+def test_an_unimportable_plugin_is_a_readable_error_not_a_traceback(tmp_path, capsys):
+    suite = tmp_path / "s.yaml"
+    suite.write_text("name: p\ntarget: {type: mock}\nattacks: [direct]\n"
+                     "plugins: [no.such.module]\n")
+    code = main(["run", str(suite), "--out", str(tmp_path), "--quiet", "--format", "json"])
+    assert code == 2
+    assert "could not import plugin module" in capsys.readouterr().err
+
+
+def test_the_documented_example_suite_runs_with_its_plugin(tmp_path):
+    """examples/support-bot.yaml loads examples.custom_plugins by name; the
+    command in its own docstring has to work from the project root."""
+    code = main(["run", "examples/support-bot.yaml", "--out", str(tmp_path),
+                 "--quiet", "--format", "json", "--rate-limit", "0",
+                 "--attacks", "policy_citation", "--allow-untested"])
+    assert code == 0
+    data = json.loads((tmp_path / "report.json").read_text())
+    assert "policy_citation" in data["summary"]["by_attack"]
+
+
+def test_switching_target_type_warns_that_the_suite_block_is_dropped(tmp_path, capsys):
+    suite = tmp_path / "s.yaml"
+    suite.write_text("name: s\ntarget:\n  type: http\n  url: http://127.0.0.1:9/x\n"
+                     "attacks: [direct]\nobjectives: {include: [policy.forbidden_output]}\n")
+    main(["run", str(suite), "--target-type", "mock", "--out", str(tmp_path),
+          "--format", "json"])
+    assert "replaces the suite's target block" in capsys.readouterr().err

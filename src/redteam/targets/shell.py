@@ -16,7 +16,7 @@ import time
 from typing import Any
 
 from ..registry import register_target
-from ..types import Conversation, Response
+from ..types import Conversation, Response, Role
 from .base import CAP_MULTI_TURN, Target, dig, error_response
 
 
@@ -33,7 +33,7 @@ class ShellTarget(Target):
         self.cwd = options.get("cwd")
 
     async def send(self, conversation: Conversation) -> Response:
-        prompt = _render_transcript(conversation)
+        prompt = _render_transcript(conversation, self.system_prompt)
         argv = list(self.command)
         stdin_data = b""
         if self.prompt_arg:
@@ -50,8 +50,22 @@ class ShellTarget(Target):
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.cwd,
             )
-            out, err = await asyncio.wait_for(proc.communicate(stdin_data), self.timeout)
         except Exception as exc:  # noqa: BLE001
+            return error_response(exc, started)
+
+        try:
+            out, err = await asyncio.wait_for(proc.communicate(stdin_data), self.timeout)
+        except asyncio.TimeoutError:
+            # wait_for only cancels the read; the child keeps running. Over a
+            # few hundred attempts that is a few hundred orphaned processes.
+            await _terminate(proc)
+            return Response(
+                text="",
+                latency_ms=(time.perf_counter() - started) * 1000,
+                error=f"target did not respond within {self.timeout}s (process killed)",
+            )
+        except Exception as exc:  # noqa: BLE001
+            await _terminate(proc)
             return error_response(exc, started)
 
         latency = (time.perf_counter() - started) * 1000
@@ -70,8 +84,31 @@ class ShellTarget(Target):
         return Response(text=text, latency_ms=latency)
 
 
-def _render_transcript(conversation: Conversation) -> str:
-    """Flatten multi-turn history for CLIs that take a single string."""
-    if len(conversation.turns) == 1:
+async def _terminate(proc: asyncio.subprocess.Process) -> None:
+    """Terminate, then kill if it will not go, and always reap."""
+    if proc.returncode is not None:
+        return
+    try:
+        proc.terminate()
+        try:
+            await asyncio.wait_for(proc.wait(), 5.0)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+    except ProcessLookupError:
+        pass
+
+
+def _render_transcript(conversation: Conversation, system_prompt: str | None = None) -> str:
+    """Flatten multi-turn history for CLIs that take a single string.
+
+    The configured system prompt is prepended; without it the target under test
+    is not the one the operator deployed.
+    """
+    parts = []
+    if system_prompt and not any(t.role is Role.SYSTEM for t in conversation.turns):
+        parts.append(f"[system] {system_prompt}")
+    if not parts and len(conversation.turns) == 1:
         return conversation.turns[0].content
-    return "\n\n".join(f"[{t.role.value}] {t.content}" for t in conversation.turns)
+    parts += [f"[{t.role.value}] {t.content}" for t in conversation.turns]
+    return "\n\n".join(parts)

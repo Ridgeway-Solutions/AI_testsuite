@@ -18,6 +18,7 @@ from typing import Any, Callable, Iterable
 from .attacks.base import Attack, AttackContext
 from .config import SuiteConfig
 from .detectors.base import JudgeContext, judge_all
+from .detectors.llm_judge import close_judge_targets
 from .objectives import filter_objectives, load_objectives
 from .registry import available, get, load_plugins
 from .scoring import Scoreboard, score
@@ -39,15 +40,35 @@ class Skip:
 
 
 @dataclass
+class RunError:
+    """An attack or detector that raised. Its remaining payloads never ran, so
+    this is a coverage hole and has to appear in the report, not just on stderr."""
+
+    attack_id: str
+    objective_id: str
+    error: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"attack": self.attack_id, "objective": self.objective_id,
+                "error": self.error}
+
+
+@dataclass
 class RunResult:
     config: SuiteConfig
     target_info: dict[str, Any]
     attempts: list[Attempt] = field(default_factory=list)
     skipped: list[Skip] = field(default_factory=list)
+    errors: list[RunError] = field(default_factory=list)
     objectives: list[Objective] = field(default_factory=list)
     started_at: float = field(default_factory=time.time)
     finished_at: float = 0.0
     stopped_early: bool = False
+
+    @property
+    def broken_objectives(self) -> set[str]:
+        """Objectives whose coverage was cut short by a crashing plugin."""
+        return {e.objective_id for e in self.errors}
 
     @property
     def duration_s(self) -> float:
@@ -58,9 +79,11 @@ class RunResult:
         return board
 
 
-def build_target(spec: dict[str, Any]) -> Target:
+def build_target(spec: dict[str, Any], default_timeout: float | None = None) -> Target:
     spec = dict(spec)
     kind = spec.pop("type", "mock")
+    if default_timeout is not None:
+        spec.setdefault("timeout", default_timeout)
     return get("target", kind)(**spec)
 
 
@@ -93,14 +116,19 @@ class Runner:
         load_plugins(config.plugins)
         self.config = config
         self.settings = config.run
-        self.target = target or build_target(config.target)
+        self.target = target or build_target(config.target, config.run.timeout)
         self.attacks = attacks if attacks is not None else select_attacks(config.attacks)
-        self.objectives = objectives if objectives is not None else filter_objectives(
-            load_objectives(config.resolve_objectives_file()),
-            ids=config.include_objectives,
-            categories=config.categories,
-            tags=config.tags,
-        )
+        if objectives is not None:
+            self.objectives = objectives
+        else:
+            catalogue = load_objectives(config.resolve_objectives_file())
+            _validate_filters(catalogue, config)
+            self.objectives = filter_objectives(
+                catalogue,
+                ids=config.include_objectives,
+                categories=config.categories,
+                tags=config.tags,
+            )
         self.on_event = on_event or (lambda kind, payload: None)
         self.stream_path = stream_path
         self._limiter = RateLimiter(self.settings.rate_limit_rps)
@@ -108,6 +136,9 @@ class Runner:
         self._stop = asyncio.Event()
         self._criticals = 0
         self._stream = None
+
+    def _objectives_without_detectors(self) -> list[str]:
+        return [o.id for o in self.objectives if not o.detectors]
 
     # -- planning ---------------------------------------------------------------
 
@@ -138,8 +169,9 @@ class Runner:
                         Skip(
                             attack.id,
                             objective.id,
-                            "objective needs a harness-seeded system prompt "
-                            "(set target.system_prompt, or use a target you control)",
+                            "objective needs a harness-seeded system prompt; set "
+                            "target.system_prompt (and supports_system_prompt: "
+                            "true on the http target) so the canary can be planted",
                         )
                     )
                     continue
@@ -156,6 +188,13 @@ class Runner:
             skipped=skips,
             objectives=list(self.objectives),
         )
+        undetectable = self._objectives_without_detectors()
+        if undetectable:
+            self.on_event("warning", {
+                "message": "objectives with no detectors fall back to refusal "
+                           "heuristics only, which is weak evidence",
+                "objectives": undetectable,
+            })
         self.on_event("run_start", {
             "pairs": len(pairs),
             "attacks": len(self.attacks),
@@ -180,6 +219,7 @@ class Runner:
                 self._stream.close()
                 self._stream = None
             await self.target.aclose()
+            await close_judge_targets()
 
         result.finished_at = time.time()
         result.stopped_early = self._stop.is_set()
@@ -205,9 +245,12 @@ class Runner:
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - one bad attack must not kill the run
-            self.on_event("attack_error", {
-                "attack": attack.id, "objective": objective.id, "error": repr(exc),
-            })
+            # The generator is dead, so this pair's remaining payloads never
+            # ran. Record it: a coverage hole that only reaches stderr would
+            # let a partially-executed scan read as a clean pass.
+            error = RunError(attack.id, objective.id, repr(exc))
+            result.errors.append(error)
+            self.on_event("attack_error", error.to_dict())
 
     async def _execute(
         self, attack: Attack, objective: Objective, conversation: Conversation, result: RunResult
@@ -231,6 +274,7 @@ class Runner:
             response=response,
             verdicts=verdicts,
             severity=objective.severity,
+            category=objective.category,
             variant=conversation.label,
             turn_count=len(conversation.turns),
             tags=list(objective.tags),
@@ -267,3 +311,28 @@ class Runner:
             if limit and self._criticals >= limit and not self._stop.is_set():
                 self._stop.set()
                 self.on_event("stop_early", {"criticals": self._criticals})
+
+
+def _validate_filters(catalogue: list[Objective], config: SuiteConfig) -> None:
+    """Reject filters that select nothing.
+
+    An unknown attack id already raises. An unknown objective id used to yield
+    an empty run that reported "strong" and exited 0 — a CI gate passing on a
+    scan that tested nothing.
+    """
+    known = {o.id for o in catalogue}
+    unknown = [i for i in config.include_objectives if i not in known]
+    if unknown:
+        raise KeyError(
+            f"unknown objective(s) {unknown}. Available: {', '.join(sorted(known))}"
+        )
+    for label, wanted, present in (
+        ("categories", config.categories, {o.category for o in catalogue}),
+        ("tags", config.tags, {t for o in catalogue for t in o.tags}),
+    ):
+        missing = [w for w in wanted if w not in present]
+        if missing:
+            raise KeyError(
+                f"no objective matches {label} {missing}. "
+                f"Available: {', '.join(sorted(present))}"
+            )
