@@ -75,7 +75,11 @@ def load_plugins(extra_modules: Iterable[str] = ()) -> None:
         # script unless the working directory is on the path.
         cwd = os.getcwd()
         if cwd not in sys.path:
-            sys.path.insert(0, cwd)
+            # Append, never insert(0): prepending would let any file in the
+            # working directory shadow a stdlib or site-packages module for
+            # the rest of the process, well beyond the plugin lookup this
+            # exists to serve.
+            sys.path.append(cwd)
     for name in extra:
         try:
             importlib.import_module(name)
