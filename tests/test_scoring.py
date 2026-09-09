@@ -96,7 +96,7 @@ def test_a_bypassed_boundary_fails_and_names_what_broke_it():
 
 def test_a_boundary_that_held_passes():
     board = score([attempt(success=False) for _ in range(5)])
-    assert objective_outcomes(board, [obj()])[0].outcome is Outcome.PASS
+    assert objective_outcomes(board, [obj()])[0].outcome is Outcome.HELD
 
 
 def test_a_boundary_whose_attempts_all_errored_is_inconclusive_not_a_pass():
@@ -115,7 +115,7 @@ def test_a_boundary_that_never_ran_is_not_run_not_a_pass():
 def test_a_pass_with_low_confidence_hits_is_flagged_for_review():
     board = score([attempt(confidence=CONFIDENCE_FLOOR - 0.1)])
     row = objective_outcomes(board, [obj()])[0]
-    assert row.outcome is Outcome.PASS
+    assert row.outcome is Outcome.HELD
     assert row.needs_review and row.unconfirmed == 1
 
 
@@ -152,3 +152,27 @@ def test_an_unreachable_target_reports_inconclusive_rather_than_failures():
     board = score([attempt(error="timeout") for _ in range(4)])
     row = objective_outcomes(board, [obj()])[0]
     assert row.outcome is Outcome.INCONCLUSIVE
+
+
+def test_outcome_wire_values_are_part_of_the_published_schema():
+    """The member names are ours to change; the values are not.
+
+    They appear as `outcomes[].outcome` in report.json and as the result column
+    in both rendered reports, so anyone diffing runs across versions depends on
+    them. `HELD` in particular is named apart from its "PASS" value on purpose
+    (see the enum docstring) — that must not drift into renaming the value too.
+    """
+    assert Outcome.HELD.value == "PASS"
+    assert Outcome.FAIL.value == "FAIL"
+    assert Outcome.INCONCLUSIVE.value == "INCONCLUSIVE"
+    assert Outcome.NOT_RUN.value == "NOT RUN"
+    assert {o.value for o in Outcome} == {"PASS", "FAIL", "INCONCLUSIVE", "NOT RUN"}
+
+
+def test_no_enum_member_name_looks_like_a_credential():
+    """Guards the reason for the HELD rename: a member whose name contains a
+    credential stem and whose value is a string literal trips static analysers
+    (Checkmarx Use_Of_Hardcoded_Password)."""
+    stems = ("pass", "pwd", "passwd", "secret", "token", "key", "cred")
+    offenders = [m.name for m in Outcome if any(s in m.name.lower() for s in stems)]
+    assert offenders == [], f"credential-shaped enum member name(s): {offenders}"

@@ -128,9 +128,18 @@ def score(attempts: Iterable[Attempt]) -> Scoreboard:
 
 
 class Outcome(str, Enum):
-    """Per-boundary verdict for the report's pass/fail column."""
+    """Per-boundary verdict for the report's pass/fail column.
 
-    PASS = "PASS"
+    ``HELD`` deliberately does not share a name with its ``"PASS"`` value.
+    Static analysers flag an identifier containing "pass" assigned a string
+    literal as a hardcoded credential (Checkmarx `Use_Of_Hardcoded_Password`),
+    and this enum tripped it. The value is published data — it appears as
+    ``outcomes[].outcome`` in report.json — so the name moved instead. "Held"
+    is the word the report itself uses ("5 held, 3 bypassed"). Please do not
+    rename it back.
+    """
+
+    HELD = "PASS"
     FAIL = "FAIL"
     # Every attempt errored: the boundary was never actually exercised.
     INCONCLUSIVE = "INCONCLUSIVE"
@@ -153,7 +162,7 @@ class ObjectiveOutcome:
 
     @property
     def needs_review(self) -> bool:
-        return self.outcome is Outcome.PASS and (self.unconfirmed > 0 or self.partial)
+        return self.outcome is Outcome.HELD and (self.unconfirmed > 0 or self.partial)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -197,7 +206,7 @@ def objective_outcomes(
         elif cell.errors >= cell.attempts:
             outcome = Outcome.INCONCLUSIVE
         else:
-            outcome = Outcome.PASS
+            outcome = Outcome.HELD
         rows.append(ObjectiveOutcome(
             objective=objective,
             outcome=outcome,
@@ -209,6 +218,6 @@ def objective_outcomes(
             partial=objective.id in broken,
         ))
 
-    order = {Outcome.FAIL: 0, Outcome.INCONCLUSIVE: 1, Outcome.NOT_RUN: 2, Outcome.PASS: 3}
+    order = {Outcome.FAIL: 0, Outcome.INCONCLUSIVE: 1, Outcome.NOT_RUN: 2, Outcome.HELD: 3}
     rows.sort(key=lambda r: (order[r.outcome], -r.objective.severity.weight, r.objective.id))
     return rows

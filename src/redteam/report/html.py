@@ -159,7 +159,7 @@ def render_html(result: RunResult) -> str:
 
     # Objectives
     outcomes = objective_outcomes(board, result.objectives, result.broken_objectives)
-    passed = sum(1 for r in outcomes if r.outcome is Outcome.PASS)
+    passed = sum(1 for r in outcomes if r.outcome is Outcome.HELD)
     failed = sum(1 for r in outcomes if r.outcome is Outcome.FAIL)
     untested = len(outcomes) - passed - failed
 

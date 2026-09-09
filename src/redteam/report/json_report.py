@@ -27,7 +27,7 @@ def build(result: RunResult) -> dict[str, Any]:
             **board.to_dict(),
             "boundaries": {
                 "total": len(outcomes),
-                "passed": sum(1 for r in outcomes if r.outcome is Outcome.PASS),
+                "passed": sum(1 for r in outcomes if r.outcome is Outcome.HELD),
                 "failed": sum(1 for r in outcomes if r.outcome is Outcome.FAIL),
                 "untested": sum(1 for r in outcomes
                                 if r.outcome in (Outcome.NOT_RUN, Outcome.INCONCLUSIVE)),
