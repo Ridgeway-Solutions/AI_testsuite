@@ -24,7 +24,7 @@ from .registry import available, get, load_plugins
 from .scoring import Scoreboard, score
 from .targets.base import CAP_SEEDING, Target
 from .types import Attempt, Conversation, Objective, Response
-from .util import RateLimiter, redact, stable_rng
+from .util import RateLimiter, redact, redact_tree, stable_rng
 
 EventHook = Callable[[str, dict[str, Any]], None]
 
@@ -248,7 +248,7 @@ class Runner:
             # The generator is dead, so this pair's remaining payloads never
             # ran. Record it: a coverage hole that only reaches stderr would
             # let a partially-executed scan read as a clean pass.
-            error = RunError(attack.id, objective.id, repr(exc))
+            error = RunError(attack.id, objective.id, redact(repr(exc)))
             result.errors.append(error)
             self.on_event("attack_error", error.to_dict())
 
@@ -297,8 +297,17 @@ class Runner:
         return last or Response(text="", error="no response")
 
     def _record(self, attempt: Attempt) -> None:
-        # Credential-shaped strings never reach disk or the console.
+        # Redact in place, and everywhere untrusted text lands — not just
+        # response.text. Transport errors quote the endpoint and up to 800
+        # bytes of the upstream body; detector rationales and signals quote
+        # the response. Reports render from these objects, so redacting the
+        # serialised copy alone would leave the HTML and Markdown untouched.
         attempt.response.text = redact(attempt.response.text)
+        if attempt.response.error:
+            attempt.response.error = redact(attempt.response.error)
+        for verdict in attempt.verdicts:
+            verdict.rationale = redact(verdict.rationale)
+            verdict.signals = redact_tree(verdict.signals)
         payload = attempt.to_dict(include_payload=self.settings.include_payloads)
         if self._stream:
             self._stream.write(json.dumps(payload, ensure_ascii=False) + "\n")

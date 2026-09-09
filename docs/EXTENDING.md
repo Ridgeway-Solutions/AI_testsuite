@@ -83,6 +83,12 @@ Return a `Response` with `error` set rather than raising — the runner retries
 those and excludes them from ASR denominators. Set `blocked=True` when the
 target's own guardrail refused, so a block is not scored as a model refusal.
 
+Anything you accept as an option lands in `self.options`, and the report shows
+only allowlisted names (`PUBLIC_OPTION_KEYS` in `targets/base.py`); everything
+else is listed as withheld. If your adapter adds an option that is safe to
+publish and useful in a report header, add it to that set — never widen the
+filter to pass options through by default.
+
 Before writing one, check whether the `http` adapter's body template already
 covers your endpoint's shape.
 

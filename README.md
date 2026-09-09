@@ -211,10 +211,23 @@ count — averaging over a big suite of easy probes would dilute one critical
 bypass into a reassuring number. Breadth across techniques nudges it up but
 cannot carry it.
 
-Credential-shaped strings in responses are redacted before anything reaches
-disk. Attacker-controlled text is escaped in the HTML report. Use `--no-payloads`
-when a report will be seen by a wider audience than the people authorised to run
-the tests.
+A report is a shared artefact built from two things you would not choose to
+publish — your target configuration, and text returned by a system that may be
+compromised — so both are handled defensively:
+
+- The report's target block is an **allowlist**: known-safe options are shown,
+  URLs appear without userinfo or query string, and everything else is listed
+  by name as withheld. A secret nested in a body template or an `extra_body`
+  never reaches the file.
+- Credential-shaped strings are redacted from responses, transport errors and
+  detector output alike, on the objects the reports render from.
+- Attacker-controlled text is escaped in **both** the HTML and Markdown
+  reports — markdown gets pasted into wikis, and not every renderer sanitises.
+- Targets must be `http`/`https`; `file:`, `ftp:` and `data:` are refused, so a
+  mistyped endpoint cannot read a local file and report it as model output.
+
+Redaction is a backstop, not a guarantee. Use `--no-payloads` when a report will
+be seen by a wider audience than the people authorised to run the tests.
 
 ## In CI
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 from collections import Counter
 from datetime import datetime, timezone
 
@@ -12,6 +13,21 @@ from ..util import truncate
 from .remediation import ATTACK_NOTES, for_categories
 
 BAR = "█"
+
+
+def _md(text: str, limit: int = 90) -> str:
+    """Neutralise untrusted text for a Markdown table cell.
+
+    Escaping the table delimiter is not enough: model output reaches this
+    document, and some renderers pass raw HTML and link syntax straight
+    through. Reports get pasted into wikis, so strip the markup rather than
+    trusting whatever renders it.
+    """
+    flattened = truncate(" ".join(text.split()), limit)
+    escaped = html.escape(flattened, quote=False)
+    for char in ("\\", "|", "`", "[", "]", "<", ">"):
+        escaped = escaped.replace(char, "\\" + char)
+    return escaped
 
 
 def _bar(fraction: float, width: int = 12) -> str:
@@ -28,7 +44,8 @@ def render_markdown(result: RunResult) -> str:
 
     w(f"# Adversarial robustness report — {result.config.name}")
     w("")
-    w(f"**Target:** `{result.target_info['name']}` ({result.target_info['type']})  ")
+    w(f"**Target:** `{_md(str(result.target_info['name']), 60)}` "
+      f"({_md(str(result.target_info['type']), 30)})  ")
     w(f"**Run:** {ts} · {result.duration_s:.1f}s · {len(result.attempts)} attempts  ")
     w(f"**Risk score:** {board.risk_score}/100 — **{board.grade}**")
     w("")
@@ -46,7 +63,7 @@ def render_markdown(result: RunResult) -> str:
         w(f"> **{len(result.errors)} technique(s) crashed mid-run**, so their "
           "remaining payloads never ran. Coverage below is incomplete:")
         for err in result.errors[:8]:
-            w(f"> - `{err.attack_id}` on `{err.objective_id}`: {err.error}")
+            w(f"> - `{err.attack_id}` on `{err.objective_id}`: {_md(err.error, 200)}")
         w("")
 
     # -- findings ---------------------------------------------------------------
@@ -61,7 +78,7 @@ def render_markdown(result: RunResult) -> str:
         w("| # | Severity | Objective | Technique | Variant | Conf. | Evidence |")
         w("|---|----------|-----------|-----------|---------|-------|----------|")
         for i, a in enumerate(board.findings[:40], 1):
-            evidence = truncate(a.response.text.replace("\n", " ").replace("|", "\\|"), 90)
+            evidence = _md(a.response.text)
             w(f"| {i} | **{a.severity.value}** | `{a.objective_id}` | `{a.attack_id}` "
               f"| {a.variant or '—'} | {a.confidence:.2f} | {evidence} |")
         if len(board.findings) > 40:
@@ -151,7 +168,7 @@ def render_markdown(result: RunResult) -> str:
     if result.skipped:
         w(f"- Skipped pairs: {len(result.skipped)}")
         for reason, count in Counter(s.reason for s in result.skipped).most_common(6):
-            w(f"  - {count}× {reason}")
+            w(f"  - {count}× {_md(reason, 160)}")
     w("")
     w("---")
     w("")

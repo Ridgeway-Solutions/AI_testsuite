@@ -11,11 +11,13 @@ import asyncio
 import json
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from abc import ABC, abstractmethod
 from typing import Any
 
 from ..types import Conversation, Response, Role, Turn
+from ..util import redact_tree, safe_url
 
 # Capability flags an attack can require. A suite silently skips attacks whose
 # requirements the configured target cannot satisfy (reported as "skipped").
@@ -29,6 +31,24 @@ CAP_SEEDING = "seeding"  # harness may inject its own system prompt / canary
 # and only on a tool turn — everything else must be stripped before the request,
 # or strict APIs reject the whole call with a 400.
 PROVIDER_META_KEYS = frozenset({"name", "tool_call_id"})
+
+# Target options that are safe to publish in a report, by name. This is an
+# allowlist on purpose: a denylist cannot anticipate where an operator puts a
+# secret — nested inside a body template, in an `extra_body`, in a shell
+# command's argv — and reports are written to be shared. Anything not listed is
+# reported as present-but-withheld rather than echoed.
+PUBLIC_OPTION_KEYS = frozenset({
+    "model", "profile", "response_path", "blocked_path", "temperature",
+    "max_tokens", "timeout", "anthropic_version", "api_key_env",
+    "supports_system_prompt", "supports_prefill", "prompt_arg", "cwd",
+})
+# Shown, but with userinfo and query string stripped.
+URL_OPTION_KEYS = frozenset({"url", "base_url"})
+
+# Schemes http_post_json will talk. urllib's default opener also handles
+# file:, ftp: and data:, which are not endpoints and would turn a mistyped
+# target into a local file read reported as model output.
+ALLOWED_URL_SCHEMES = frozenset({"http", "https"})
 
 
 class TargetError(RuntimeError):
@@ -81,18 +101,32 @@ class Target(ABC):
         return msgs
 
     def describe(self) -> dict[str, Any]:
-        """Metadata for the report header. Never includes credentials."""
-        safe = {
-            k: v
-            for k, v in self.options.items()
-            if k not in {"api_key", "headers", "token", "auth"}
-        }
-        return {
+        """Metadata for the report header, with credentials withheld.
+
+        Only allowlisted option names are echoed; URLs are stripped of
+        userinfo and query string; everything else is named but not shown, so
+        the reader can still see how the target was configured without the
+        report carrying the operator's secrets.
+        """
+        shown: dict[str, Any] = {}
+        withheld: list[str] = []
+        for key, value in self.options.items():
+            if key in URL_OPTION_KEYS and isinstance(value, str):
+                shown[key] = safe_url(value)
+            elif key in PUBLIC_OPTION_KEYS:
+                shown[key] = value
+            elif key != "name":
+                withheld.append(key)
+
+        described = {
             "type": self.id,
             "name": self.name,
             "capabilities": sorted(self.capabilities),
-            "options": safe,
+            "options": shown,
+            "options_withheld": sorted(withheld),
         }
+        # Belt and braces: an allowlisted value could still quote a secret.
+        return redact_tree(described)
 
 
 async def http_post_json(
@@ -106,6 +140,13 @@ async def http_post_json(
     Uses urllib in a worker thread so the package has no runtime HTTP
     dependency; proxy settings are picked up from the environment as usual.
     """
+
+    scheme = urllib.parse.urlsplit(url).scheme.lower()
+    if scheme not in ALLOWED_URL_SCHEMES:
+        raise TargetError(
+            f"refusing to request {scheme or 'scheme-less'} URL: targets must be "
+            f"http or https, got {safe_url(url)}"
+        )
 
     body = json.dumps(payload).encode()
     hdrs = {"Content-Type": "application/json", **(headers or {})}
