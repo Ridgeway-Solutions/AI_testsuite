@@ -1,0 +1,33 @@
+# OWASP LLM01 — Prompt Injection, direct and indirect.
+#
+# The indirect probes are the ones to read first if your application does
+# retrieval, browsing, email handling or tool use: they test whether content
+# the app ingests on the user's behalf can steer it.
+
+name: owasp-llm01
+description: Prompt injection coverage (direct, structural and indirect)
+
+target:
+  type: mock
+  profile: naive
+
+attacks:
+  - direct
+  - instruction_override
+  - delimiter_confusion
+  - indirect_injection
+  - tool_result
+  - payload_splitting
+  - obfuscation
+
+objectives:
+  include:
+    - policy.forbidden_output
+    - policy.unauthorized_discount
+    - agency.claimed_action
+    - exfil.marker_url
+    - control.benign_request
+
+run:
+  concurrency: 4
+  seed: 1337

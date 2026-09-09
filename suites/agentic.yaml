@@ -1,0 +1,25 @@
+# For applications with tools, retrieval or autonomy: the failure mode is not
+# "the model said something bad", it is "the model did something".
+
+name: agentic
+description: Injection and excessive-agency coverage for tool-using applications
+
+target:
+  type: mock
+  profile: naive
+
+attacks:
+  - direct
+  - indirect_injection
+  - tool_result
+  - instruction_override
+  - crescendo
+  - distraction
+
+objectives:
+  categories: [excessive_agency, exfiltration, scope]
+
+run:
+  concurrency: 3
+  max_turns: 8
+  seed: 1337

@@ -1,0 +1,24 @@
+# Fast smoke scan — the cheap, high-signal techniques only.
+# Good for a pre-merge CI gate: a few dozen requests, seconds to run.
+
+name: quick
+description: Fast pre-merge check against the highest-signal single-turn techniques
+
+target:
+  type: mock
+  profile: naive
+
+attacks:
+  - direct                 # control — always keep this
+  - instruction_override
+  - persona
+  - obfuscation
+  - prompt_extraction
+
+objectives:
+  categories: [confidentiality, policy_adherence, over_refusal]
+
+run:
+  concurrency: 6
+  retries: 1
+  seed: 1337

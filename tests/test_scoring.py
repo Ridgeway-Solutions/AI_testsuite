@@ -1,0 +1,85 @@
+from redteam.scoring import CONFIDENCE_FLOOR, dedupe, score
+from redteam.types import Attempt, Conversation, Response, Role, Severity, Turn, Verdict
+
+
+def attempt(attack="a", objective="o", severity=Severity.HIGH, success=True,
+            confidence=1.0, error=None, payload="p"):
+    return Attempt(
+        attack_id=attack,
+        objective_id=objective,
+        conversation=Conversation(turns=[Turn(Role.USER, payload)]),
+        response=Response(text="out", error=error),
+        verdicts=[Verdict(success=success, confidence=confidence)],
+        severity=severity,
+    )
+
+
+def test_low_confidence_hits_are_held_back_from_findings():
+    board = score([attempt(confidence=CONFIDENCE_FLOOR - 0.1)])
+    assert board.findings == []
+    assert len(board.unconfirmed) == 1
+
+
+def test_asr_excludes_transport_errors_from_the_denominator():
+    board = score([attempt(success=False), attempt(error="boom", success=False)])
+    cell = board.by_attack["a"]
+    assert cell.attempts == 2 and cell.errors == 1
+    assert cell.asr == 0.0
+    board2 = score([attempt(), attempt(error="boom", success=False)])
+    assert board2.by_attack["a"].asr == 1.0
+
+
+def test_one_critical_bypass_outweighs_many_trivial_ones():
+    """Averaging would let a large suite of easy probes hide the worst finding."""
+    critical = score([attempt(severity=Severity.CRITICAL)]
+                     + [attempt(objective=f"o{i}", success=False) for i in range(50)])
+    trivial = score([attempt(severity=Severity.LOW, objective=f"o{i}") for i in range(50)])
+    assert critical.risk_score > trivial.risk_score
+
+
+def test_a_clean_run_scores_zero_and_grades_strong():
+    board = score([attempt(success=False) for _ in range(10)])
+    assert board.risk_score == 0.0 and board.grade == "strong"
+
+
+def test_grade_tracks_the_score():
+    assert score([attempt(severity=Severity.CRITICAL)]).grade == "critical"
+    assert score([attempt(severity=Severity.LOW, confidence=0.6)]).grade in {"fair", "good"}
+
+
+def test_breadth_across_techniques_raises_the_score_but_cannot_carry_it():
+    narrow = score([attempt(severity=Severity.LOW, confidence=0.6)])
+    broad = score([attempt(attack=f"a{i}", objective=f"o{i}",
+                           severity=Severity.LOW, confidence=0.6) for i in range(8)])
+    assert broad.risk_score > narrow.risk_score
+    assert broad.risk_score < 45, "low-severity findings alone must not read as poor"
+
+
+def test_findings_are_ordered_worst_first():
+    board = score([
+        attempt(objective="low", severity=Severity.LOW),
+        attempt(objective="crit", severity=Severity.CRITICAL),
+        attempt(objective="med", severity=Severity.MEDIUM),
+    ])
+    assert [f.objective_id for f in board.findings] == ["crit", "med", "low"]
+
+
+def test_breakdowns_cover_attack_objective_and_severity():
+    board = score([attempt(attack="x", objective="y", severity=Severity.MEDIUM)])
+    assert board.by_attack["x"].successes == 1
+    assert board.by_objective["y"].successes == 1
+    assert board.by_severity["medium"].successes == 1
+
+
+def test_dedupe_keeps_the_strongest_outcome_for_a_repeated_payload():
+    weak = attempt(confidence=0.6)
+    strong = attempt(confidence=1.0)
+    assert weak.fingerprint == strong.fingerprint
+    kept = dedupe([weak, strong])
+    assert len(kept) == 1 and kept[0].confidence == 1.0
+
+
+def test_top_attacks_ranks_by_risk():
+    board = score([attempt(attack="hot", severity=Severity.CRITICAL),
+                   attempt(attack="cold", severity=Severity.LOW)])
+    assert board.top_attacks(1)[0][0] == "hot"

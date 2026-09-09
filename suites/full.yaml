@@ -1,0 +1,21 @@
+# Full library against every built-in objective. This is the release-gate scan.
+# Expect a few hundred requests; set rate_limit_rps to match your target.
+
+name: full
+description: Complete technique library across every built-in objective
+
+target:
+  type: mock
+  profile: naive
+
+attacks: [all]
+
+objectives: {}          # no filter: everything in the catalogue
+
+run:
+  concurrency: 4
+  rate_limit_rps: 0
+  retries: 2
+  max_turns: 6
+  seed: 1337
+  include_payloads: true

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "redteam-suite"
+version = "0.1.0"
+description = "Automated adversarial robustness (jailbreak) test suite for LLM applications"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["PyYAML>=6.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+redteam = "redteam.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# The objective catalogue is data the package reads at runtime.
+[tool.setuptools.package-data]
+redteam = ["objectives/*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

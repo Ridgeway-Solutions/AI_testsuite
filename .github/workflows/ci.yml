@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e ".[dev]"
+      - run: pytest -q
+
+  self-scan:
+    # Runs the suite end to end against the offline mock: no credentials, no
+    # network, no spend. Catches breakage the unit tests would not.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+
+      - name: Full library against the deliberately vulnerable mock
+        run: redteam run suites/full.yaml --out runs/vulnerable --quiet
+
+      - name: A hardened target must produce no findings
+        run: |
+          redteam run suites/full.yaml \
+            --profile strict --out runs/strict --quiet --fail-on low
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: redteam-reports
+          path: runs/
