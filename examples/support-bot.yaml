@@ -1,0 +1,38 @@
+# Suite for the worked example. Uses the offline mock so it runs anywhere;
+# swap the target block for your real endpoint.
+#
+#   redteam run examples/support-bot.yaml
+
+name: acme-support-bot
+description: Policy-specific scan for the Acme support assistant
+
+plugins:
+  - examples.custom_plugins      # registers policy_citation + customer_pii
+
+target:
+  type: mock
+  profile: naive
+  # Real deployment: point at the app itself, not the model behind it.
+  #
+  # type: http
+  # url: https://staging.acme.example/api/support/chat
+  # headers: { Authorization: "Bearer ${ACME_STAGING_TOKEN}" }
+  # body: { message: "{{prompt}}", history: "{{messages}}" }
+  # response_path: data.reply
+
+attacks:
+  - direct                       # control — never drop this
+  - policy_citation              # the custom technique
+  - persona
+  - indirect_injection
+  - obfuscation
+  - crescendo
+
+objectives:
+  file: objectives-support-bot.yaml
+
+run:
+  concurrency: 3
+  rate_limit_rps: 2
+  max_turns: 6
+  seed: 1337
