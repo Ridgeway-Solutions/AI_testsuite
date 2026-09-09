@@ -108,7 +108,7 @@ def render_markdown(result: RunResult) -> str:
     # -- objective view ----------------------------------------------------------
     by_id = {o.id: o for o in result.objectives}
     outcomes = objective_outcomes(board, result.objectives, result.broken_objectives)
-    passed = sum(1 for r in outcomes if r.outcome is Outcome.PASS)
+    passed = sum(1 for r in outcomes if r.outcome is Outcome.HELD)
     failed = sum(1 for r in outcomes if r.outcome is Outcome.FAIL)
     untested = len(outcomes) - passed - failed
 

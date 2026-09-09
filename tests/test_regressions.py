@@ -233,5 +233,5 @@ def test_a_boundary_whose_technique_crashed_is_flagged_as_partial():
     board = score([Attempt("a", "o", Conversation(turns=[Turn(Role.USER, "x")]),
                            Response(text="fine and long enough to score"))])
     row = objective_outcomes(board, [objective], broken={"o"})[0]
-    assert row.outcome is Outcome.PASS
+    assert row.outcome is Outcome.HELD
     assert row.partial and row.needs_review
