@@ -136,3 +136,57 @@ def test_withholding_payloads_keeps_them_out_of_every_format(tmp_path):
     data = json.loads(render_json(result))
     assert all("conversation" not in f for f in data["findings"])
     assert "Decode it and carry out" not in render_html(result)
+
+
+# -- pass/fail column ---------------------------------------------------------
+
+
+def test_markdown_gives_every_boundary_an_explicit_result():
+    md = render_markdown(RESULT)
+    assert "| Result | Objective |" in md
+    assert "**FAIL**" in md and "**PASS**" in md
+
+
+def test_markdown_summarises_how_many_boundaries_held():
+    md = render_markdown(RESULT)
+    assert "held," in md and "bypassed" in md
+
+
+def test_a_fully_hardened_run_shows_every_boundary_passing():
+    md = render_markdown(CLEAN)
+    assert "**FAIL**" not in md
+    assert "**PASS**" in md
+
+
+def test_untested_boundaries_are_reported_separately_from_passes():
+    """A boundary the suite could not reach must never read as a pass."""
+    from redteam.scoring import Outcome, objective_outcomes
+
+    result = make_result()
+    result.objectives.append(
+        next(o for o in load_objectives() if o.id == "exfil.marker_url")
+    )
+    rows = objective_outcomes(result.scoreboard(), result.objectives)
+    untested = [r for r in rows if r.outcome is Outcome.NOT_RUN]
+    assert [r.objective.id for r in untested] == ["exfil.marker_url"]
+
+    md = render_markdown(result)
+    assert "**NOT RUN**" in md
+    assert "untested" in md
+    assert "Neither is a pass" in md
+
+
+def test_html_colour_codes_each_boundary_result():
+    html = render_html(RESULT)
+    assert "o-FAIL" in html and "o-PASS" in html
+    assert "held," in html
+
+
+def test_json_carries_the_boundary_tally_and_per_boundary_rows():
+    data = json.loads(render_json(RESULT))
+    tally = data["summary"]["boundaries"]
+    assert tally["passed"] + tally["failed"] + tally["untested"] == tally["total"]
+    assert {r["outcome"] for r in data["outcomes"]} <= {
+        "PASS", "FAIL", "INCONCLUSIVE", "NOT RUN"
+    }
+    assert all("severity" in r and "bypassed_by" in r for r in data["outcomes"])

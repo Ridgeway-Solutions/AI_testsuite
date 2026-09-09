@@ -83,3 +83,80 @@ def test_top_attacks_ranks_by_risk():
     board = score([attempt(attack="hot", severity=Severity.CRITICAL),
                    attempt(attack="cold", severity=Severity.LOW)])
     assert board.top_attacks(1)[0][0] == "hot"
+
+
+# -- per-boundary outcomes ----------------------------------------------------
+
+from redteam.objectives import objective_from_dict  # noqa: E402
+from redteam.scoring import Outcome, objective_outcomes  # noqa: E402
+
+
+def obj(oid="o", severity="high"):
+    return objective_from_dict({"id": oid, "goal": "g", "severity": severity})
+
+
+def test_a_bypassed_boundary_fails_and_names_what_broke_it():
+    board = score([attempt(attack="obfuscation", objective="o")])
+    row = objective_outcomes(board, [obj()])[0]
+    assert row.outcome is Outcome.FAIL
+    assert row.breakers == ["obfuscation"]
+
+
+def test_a_boundary_that_held_passes():
+    board = score([attempt(success=False) for _ in range(5)])
+    assert objective_outcomes(board, [obj()])[0].outcome is Outcome.PASS
+
+
+def test_a_boundary_whose_attempts_all_errored_is_inconclusive_not_a_pass():
+    board = score([attempt(success=False, error="boom") for _ in range(3)])
+    assert objective_outcomes(board, [obj()])[0].outcome is Outcome.INCONCLUSIVE
+
+
+def test_a_boundary_that_never_ran_is_not_run_not_a_pass():
+    """An untested boundary reading as a pass is the easiest way to
+    misjudge a scan as safer than it was."""
+    row = objective_outcomes(score([]), [obj("never.tested")])[0]
+    assert row.outcome is Outcome.NOT_RUN
+    assert row.attempts == 0
+
+
+def test_a_pass_with_low_confidence_hits_is_flagged_for_review():
+    board = score([attempt(confidence=CONFIDENCE_FLOOR - 0.1)])
+    row = objective_outcomes(board, [obj()])[0]
+    assert row.outcome is Outcome.PASS
+    assert row.needs_review and row.unconfirmed == 1
+
+
+def test_a_clean_pass_is_not_flagged_for_review():
+    board = score([attempt(success=False)])
+    assert objective_outcomes(board, [obj()])[0].needs_review is False
+
+
+def test_outcomes_are_ordered_worst_first_then_by_severity():
+    board = score([
+        attempt(objective="broken_low", severity=Severity.LOW),
+        attempt(objective="broken_crit", severity=Severity.CRITICAL),
+        attempt(objective="held", success=False),
+    ])
+    rows = objective_outcomes(board, [
+        obj("held"), obj("broken_low", "low"), obj("broken_crit", "critical"),
+        obj("skipped"),
+    ])
+    assert [r.objective.id for r in rows] == [
+        "broken_crit", "broken_low", "skipped", "held",
+    ]
+
+
+def test_an_errored_attempt_is_never_a_finding():
+    """A transport failure leaves no model output to judge. Counting it would
+    make an unreachable endpoint look like a wall of refusals."""
+    board = score([attempt(error="connection refused", confidence=1.0)])
+    assert board.findings == []
+    assert board.unconfirmed == []
+    assert board.risk_score == 0.0
+
+
+def test_an_unreachable_target_reports_inconclusive_rather_than_failures():
+    board = score([attempt(error="timeout") for _ in range(4)])
+    row = objective_outcomes(board, [obj()])[0]
+    assert row.outcome is Outcome.INCONCLUSIVE

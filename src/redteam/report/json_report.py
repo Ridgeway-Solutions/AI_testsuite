@@ -6,10 +6,12 @@ import json
 from typing import Any
 
 from ..runner import RunResult
+from ..scoring import Outcome, objective_outcomes
 
 
 def build(result: RunResult) -> dict[str, Any]:
     board = result.scoreboard()
+    outcomes = objective_outcomes(board, result.objectives)
     return {
         "schema": "redteam-suite/run/1",
         "suite": {
@@ -21,7 +23,17 @@ def build(result: RunResult) -> dict[str, Any]:
         "started_at": result.started_at,
         "duration_s": round(result.duration_s, 2),
         "stopped_early": result.stopped_early,
-        "summary": board.to_dict(),
+        "summary": {
+            **board.to_dict(),
+            "boundaries": {
+                "total": len(outcomes),
+                "passed": sum(1 for r in outcomes if r.outcome is Outcome.PASS),
+                "failed": sum(1 for r in outcomes if r.outcome is Outcome.FAIL),
+                "untested": sum(1 for r in outcomes
+                                if r.outcome in (Outcome.NOT_RUN, Outcome.INCONCLUSIVE)),
+            },
+        },
+        "outcomes": [r.to_dict() for r in outcomes],
         "findings": [a.to_dict(include_payload=result.config.run.include_payloads)
                      for a in board.findings],
         "unconfirmed": [a.to_dict(include_payload=False) for a in board.unconfirmed],

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from ..registry import available
 from ..runner import RunResult
+from ..scoring import Outcome, objective_outcomes
 from ..util import truncate
 from .remediation import ATTACK_NOTES, for_categories
 
@@ -82,19 +83,36 @@ def render_markdown(result: RunResult) -> str:
     w("")
 
     # -- objective view ----------------------------------------------------------
+    by_id = {o.id: o for o in result.objectives}
+    outcomes = objective_outcomes(board, result.objectives)
+    passed = sum(1 for r in outcomes if r.outcome is Outcome.PASS)
+    failed = sum(1 for r in outcomes if r.outcome is Outcome.FAIL)
+    untested = len(outcomes) - passed - failed
+
     w("## Boundaries tested")
     w("")
-    w("| Objective | Category | Severity | Bypassed by | ASR |")
-    w("|-----------|----------|----------|-------------|-----|")
-    by_id = {o.id: o for o in result.objectives}
-    for obj_id, cell in sorted(board.by_objective.items()):
-        breakers = sorted({a.attack_id for a in board.findings if a.objective_id == obj_id})
-        obj = by_id.get(obj_id)
-        cat = obj.category if obj else "—"
-        sev = obj.severity.value if obj else "—"
-        w(f"| `{obj_id}` | {cat} | {sev} "
-          f"| {', '.join(f'`{b}`' for b in breakers) or '—'} | {cell.asr:.0%} |")
+    w(f"**{passed} held, {failed} bypassed"
+      + (f", {untested} untested**" if untested else "**")
+      + f" — out of {len(outcomes)} boundaries.")
     w("")
+    w("| Result | Objective | Category | Severity | Bypassed by | ASR |")
+    w("|--------|-----------|----------|----------|-------------|-----|")
+    for row in outcomes:
+        marker = " †" if row.needs_review else ""
+        w(f"| **{row.outcome.value}**{marker} | `{row.objective.id}` "
+          f"| {row.objective.category} | {row.objective.severity.value} "
+          f"| {', '.join(f'`{b}`' for b in row.breakers) or '—'} "
+          f"| {row.asr:.0%} |")
+    w("")
+    if any(r.needs_review for r in outcomes):
+        w("† Held, but produced low-confidence hits that fell below the reporting "
+          "threshold. Worth reading the attempts before calling it clean.")
+        w("")
+    if untested:
+        w("`NOT RUN` means the boundary was never exercised — the target could not "
+          "support the probes, or the suite filtered it out. `INCONCLUSIVE` means "
+          "every attempt errored. Neither is a pass.")
+        w("")
 
     # -- what to do --------------------------------------------------------------
     if board.findings:

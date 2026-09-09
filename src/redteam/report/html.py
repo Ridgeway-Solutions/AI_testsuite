@@ -7,6 +7,7 @@ import json
 from datetime import datetime, timezone
 
 from ..runner import RunResult
+from ..scoring import Outcome, objective_outcomes
 from ..util import truncate
 from .remediation import ATTACK_NOTES, for_categories
 
@@ -36,6 +37,9 @@ code,kbd{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5p
 text-transform:uppercase;letter-spacing:.03em;color:#fff}
 .critical{background:var(--crit)}.high{background:var(--high)}.medium{background:var(--med)}
 .low{background:var(--low)}.info{background:var(--muted)}
+.o-FAIL{background:var(--crit)}.o-PASS{background:var(--ok)}
+.o-INCONCLUSIVE,.o-NOTRUN{background:var(--muted)}
+.dagger{color:var(--muted);font-size:11px}
 .bar{height:7px;border-radius:4px;background:var(--line);overflow:hidden;min-width:70px}
 .bar>i{display:block;height:100%;background:var(--accent)}
 details{background:var(--card);border:1px solid var(--line);border-radius:10px;
@@ -154,20 +158,37 @@ def render_html(result: RunResult) -> str:
     w("</tbody></table></div>")
 
     # Objectives
+    outcomes = objective_outcomes(board, result.objectives)
+    passed = sum(1 for r in outcomes if r.outcome is Outcome.PASS)
+    failed = sum(1 for r in outcomes if r.outcome is Outcome.FAIL)
+    untested = len(outcomes) - passed - failed
+
     w("<h2>Boundaries tested</h2>")
-    w("<div class='tw'><table><thead><tr><th>Objective</th><th>Category</th>"
-      "<th>Severity</th><th>Bypassed by</th><th>ASR</th></tr></thead><tbody>")
-    for obj_id, cell in sorted(board.by_objective.items()):
-        obj = by_id.get(obj_id)
-        breakers = sorted({a.attack_id for a in board.findings if a.objective_id == obj_id})
-        sev = obj.severity.value if obj else "info"
-        w(f"<tr><td><code>{_e(obj_id)}</code><div class='note'>"
-          f"{_e(truncate(obj.description if obj else '', 130))}</div></td>"
-          f"<td>{_e(obj.category if obj else '—')}</td>"
+    w(f"<p class='note'><b>{passed} held, {failed} bypassed"
+      + (f", {untested} untested</b>" if untested else "</b>")
+      + f" — out of {len(outcomes)} boundaries.</p>")
+    w("<div class='tw'><table><thead><tr><th>Result</th><th>Objective</th>"
+      "<th>Category</th><th>Severity</th><th>Bypassed by</th><th>ASR</th>"
+      "</tr></thead><tbody>")
+    for row in outcomes:
+        sev = row.objective.severity.value
+        css = "o-" + row.outcome.value.replace(" ", "")
+        dagger = " <span class='dagger' title='low-confidence hits below the reporting threshold'>†</span>" if row.needs_review else ""
+        w(f"<tr><td><span class='pill {css}'>{_e(row.outcome.value)}</span>{dagger}</td>"
+          f"<td><code>{_e(row.objective.id)}</code><div class='note'>"
+          f"{_e(truncate(row.objective.description, 130))}</div></td>"
+          f"<td>{_e(row.objective.category)}</td>"
           f"<td><span class='pill {sev}'>{sev}</span></td>"
-          f"<td>{', '.join(f'<code>{_e(b)}</code>' for b in breakers) or '—'}</td>"
-          f"<td>{cell.asr:.0%}</td></tr>")
+          f"<td>{', '.join(f'<code>{_e(b)}</code>' for b in row.breakers) or '—'}</td>"
+          f"<td>{row.asr:.0%}</td></tr>")
     w("</tbody></table></div>")
+    if any(r.needs_review for r in outcomes):
+        w("<p class='note'>† Held, but produced low-confidence hits below the "
+          "reporting threshold. Worth reading the attempts before calling it clean.</p>")
+    if untested:
+        w("<p class='note'><b>NOT RUN</b> means the boundary was never exercised — "
+          "the target could not support the probes, or the suite filtered it out. "
+          "<b>INCONCLUSIVE</b> means every attempt errored. Neither is a pass.</p>")
 
     # Remediation
     if board.findings:

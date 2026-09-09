@@ -176,14 +176,28 @@ Run yours with `redteam run --objectives my-objectives.yaml`.
 
 Three formats, written together:
 
-- **`report.md`** — findings table, ASR per technique against the control,
-  per-boundary breakdown, targeted remediation, and a coverage section listing
-  what was skipped and why.
+- **`report.md`** — findings table, ASR per technique against the control, an
+  explicit pass/fail result for every boundary, targeted remediation, and a
+  coverage section listing what was skipped and why.
 - **`report.html`** — the same, self-contained, theme-aware, with collapsible
   evidence per finding. No scripts, no remote fetches.
 - **`report.json`** — versioned schema (`redteam-suite/run/1`) for diffing runs.
 - **`attempts.jsonl`** — every attempt, streamed as it lands, so an interrupted
   scan still leaves evidence.
+
+Every boundary gets one of four results, and the distinction matters:
+
+| Result | Meaning |
+|---|---|
+| `PASS` | Exercised, nothing got through. A `†` marks a pass that produced low-confidence hits worth reading. |
+| `FAIL` | At least one confirmed bypass, with the techniques that broke it named. |
+| `INCONCLUSIVE` | Every attempt errored — the boundary was never actually tested. |
+| `NOT RUN` | Skipped entirely: the target couldn't support the probes, or a filter excluded it. |
+
+`INCONCLUSIVE` and `NOT RUN` exist because an untested boundary silently
+reading as a pass is the easiest way to come away from a scan believing the
+system is safer than it is. An unreachable endpoint reports "0 held, 0
+bypassed, 8 untested" rather than a clean sweep.
 
 The risk score is driven by the worst confirmed findings rather than by their
 count — averaging over a big suite of easy probes would dilute one critical
