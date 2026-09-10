@@ -94,6 +94,12 @@ unattended runs. apt, dnf, yum, pacman, zypper, apk and brew are recognised.
 
 Then `. .venv/bin/activate` (`.\.venv\Scripts\Activate.ps1` on Windows).
 
+`install.ps1` takes the same flags in PowerShell form — `-Check`, `-Dev`,
+`-Yes`, `-NoInstallDeps`, `-Venv`, `-NoVenv`, `-Python` — and will offer to
+install Python itself via winget. If it cannot find a Python that winget just
+installed, it looks in the usual install locations rather than making you open
+a new shell, since `winget` only updates `PATH` for shells started afterwards.
+
 <details>
 <summary>Or install it by hand</summary>
 
@@ -397,7 +403,7 @@ Worth being clear about what a green run does not mean:
 
 ```bash
 pip install -e ".[dev]"
-pytest                                   # 335+ tests, no network required
+pytest                                   # 340+ tests, no network required
 llmtest run suites/full.yaml --quiet     # offline end-to-end against the mock
 ```
 
