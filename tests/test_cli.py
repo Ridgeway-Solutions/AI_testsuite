@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from llmtest.cli import main
+from llmtest.cli import build_parser, main
 
 
 def test_list_attacks_names_the_control(capsys):
@@ -170,3 +170,40 @@ def test_switching_target_type_warns_that_the_suite_block_is_dropped(tmp_path, c
     main(["run", str(suite), "--target-type", "mock", "--out", str(tmp_path),
           "--format", "json"])
     assert "replaces the suite's target block" in capsys.readouterr().err
+
+
+# -- terminal UI -------------------------------------------------------------
+
+
+def test_tui_is_wired_up_and_defaults_to_quiet(tmp_path):
+    # The setup screen owns the terminal, so the config-override notes the run
+    # command prints to stderr would corrupt it.
+    args = build_parser().parse_args(["tui", "suites/quick.yaml"])
+    assert args.command == "tui"
+    assert args.quiet is True
+    assert args.out == "runs/latest"
+    assert args.run is False
+
+
+def test_tui_accepts_the_same_target_overrides_as_run():
+    args = build_parser().parse_args(
+        ["tui", "--target-type", "mock", "--profile", "strict", "--run"]
+    )
+    assert args.target_type == "mock" and args.profile == "strict"
+    assert args.run is True
+
+
+def test_tui_reports_a_missing_curses_as_a_missing_feature(monkeypatch, tmp_path):
+    # curses is absent on Windows without windows-curses. The rest of the tool
+    # works fine there, so that has to read as a missing optional feature and
+    # name the fix, not as an opaque ImportError.
+    import sys
+
+    from llmtest.config import SuiteConfig
+    from llmtest.tui import launch
+
+    # A None entry is how the import system records "this cannot be imported",
+    # so this reproduces the real failure whether or not app.py is cached.
+    monkeypatch.setitem(sys.modules, "llmtest.tui.app", None)
+    with pytest.raises(ImportError, match="windows-curses"):
+        launch(SuiteConfig(), tmp_path, ["json"])

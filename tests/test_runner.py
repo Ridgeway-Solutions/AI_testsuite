@@ -238,3 +238,64 @@ def test_select_attacks_rejects_a_typo_with_a_helpful_message():
 
 def test_build_target_defaults_to_the_offline_mock():
     assert build_target({}).id == "mock"
+
+
+# -- progress and interruption -----------------------------------------------
+
+
+def test_every_planned_pair_reports_completion():
+    # A progress display cannot use the attempt count — adaptive techniques
+    # decide how many payloads to send as they go — so pair_end has to fire
+    # exactly once per planned pair.
+    events = []
+    config = suite(attacks=["direct", "obfuscation"])
+    objectives = only({"canary.secret_token", "leak.system_prompt"})
+    runner = Runner(config, objectives=objectives,
+                    on_event=lambda kind, p: events.append((kind, p)))
+    pairs, _ = runner.plan()
+    asyncio.run(runner.run())
+
+    done = [p for kind, p in events if kind == "pair_end"]
+    assert len(done) == len(pairs)
+    assert {(p["attack"], p["objective"]) for p in done} == {
+        (a.id, o.id) for a, o in pairs
+    }
+
+
+def test_a_crashed_pair_still_reports_completion():
+    from llmtest.attacks.base import Attack
+
+    class Exploding(Attack):
+        id = "exploding"
+        name = "always raises"
+
+        def build(self, ctx):
+            raise RuntimeError("boom")
+            yield  # pragma: no cover
+
+    events = []
+    runner = Runner(suite(), objectives=only({"canary.secret_token"}),
+                    attacks=[Exploding()],
+                    on_event=lambda kind, p: events.append((kind, p)))
+    result = asyncio.run(runner.run())
+
+    assert result.errors
+    # Otherwise a crash leaves a progress bar stuck below 100% for ever.
+    assert [kind for kind, _ in events].count("pair_end") == 1
+
+
+def test_request_stop_winds_a_run_down_but_keeps_its_coverage():
+    config = suite(target={"type": "mock", "profile": "vulnerable"}, attacks=["all"])
+    config.run.concurrency = 1
+    runner = Runner(config, objectives=only({"canary.secret_token"}))
+
+    async def drive():
+        task = asyncio.create_task(runner.run())
+        await asyncio.sleep(0)
+        runner.request_stop()
+        return await task
+
+    result = asyncio.run(drive())
+    assert result.stopped_early
+    # Stopping is not the same as losing the evidence already gathered.
+    assert result.objectives

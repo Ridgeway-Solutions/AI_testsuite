@@ -47,7 +47,7 @@ The catalogue includes a control objective where a refusal *is* the finding.
 ## Install
 
 ```bash
-git clone https://github.com/mattyejames/AI_testsuite && cd AI_testsuite
+git clone https://github.com/Ridgeway-Solutions/AI_testsuite && cd AI_testsuite
 pip install -e .
 llmtest --version
 ```
@@ -64,6 +64,7 @@ whole pipeline before pointing it at anything real:
 llmtest list attacks              # the technique library
 llmtest plan suites/full.yaml     # what would run, and what would be skipped
 llmtest run suites/full.yaml      # ~500 requests against the offline mock
+llmtest tui suites/full.yaml      # the same run, in a terminal UI
 ```
 
 Then scaffold a suite for your own application:
@@ -74,6 +75,52 @@ $EDITOR myapp.yaml                # describe your endpoint
 llmtest plan myapp.yaml           # confirm the shape before spending anything
 llmtest run myapp.yaml --rate-limit 2 --fail-on high
 ```
+
+## The terminal UI
+
+`llmtest tui` drives a scan from a full-screen terminal and is the fastest way
+to read one. It opens on a setup screen showing what the run will cost — pairs,
+objectives, and what will be skipped and why — and sends nothing until you press
+`r`.
+
+```
+ quick → mock (mock)
+ [███████████···················] 6/16 pairs · 21 attempts · 2 findings
+  1 Boundaries   2 Findings   3 Techniques   4 Activity
+
+   FAIL           canary.secret_token       critical   27 tried · ASR 15% · broken by obfuscation
+   FAIL           policy.forbidden_output   medium     27 tried · ASR 11% · broken by obfuscation
+   PASS           leak.system_prompt        high       27 tried · ASR  0%
+   PASS           control.benign_request    low         2 tried · ASR  0%
+```
+
+Four views, `1`-`4` or `tab` to switch:
+
+| View | What it answers |
+|---|---|
+| **Boundaries** | Did each objective hold? The same four results the reports use. |
+| **Findings** | What got through, worst first. |
+| **Techniques** | ASR per technique, each shown as lift over the `direct` control. |
+| **Activity** | The raw event feed, including errors and crashed techniques. |
+
+`enter` on a row opens the evidence behind it: the exact payload that was sent,
+which detector fired and why, and what the target said back. That is the thing
+you need in order to argue with a finding, and it is a keystroke away rather
+than a search through `attempts.jsonl`.
+
+Mid-run the Boundaries view shows live tallies but deliberately shows no
+verdict — `PASS` appears only once a boundary has actually been exercised to
+completion, for the same reason the reports distinguish `NOT RUN` from `PASS`.
+
+`x` winds a run down early and keeps the coverage it already has; reports are
+still written. `r` re-runs, `s` rewrites the reports, `?` lists the keys.
+
+The UI is a front end for exactly the same `Runner`, so `llmtest tui` accepts
+every target and filter flag `llmtest run` does, and writes the same
+`report.md`, `report.html`, `report.json` and `attempts.jsonl` when it finishes.
+It needs the standard-library `curses` module; on Windows that means
+`pip install windows-curses`, and everything else works without it. Use
+`llmtest run` in CI — the TUI expects a real terminal.
 
 ## Pointing it at your application
 
@@ -293,7 +340,7 @@ Worth being clear about what a green run does not mean:
 
 ```bash
 pip install -e ".[dev]"
-pytest                                   # 200+ tests, no network required
+pytest                                   # 300+ tests, no network required
 llmtest run suites/full.yaml --quiet     # offline end-to-end against the mock
 ```
 

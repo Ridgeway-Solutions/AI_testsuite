@@ -174,6 +174,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------- tui
+
+
+def cmd_tui(args: argparse.Namespace) -> int:
+    from .tui import launch
+
+    config = _config_from_args(args)
+    formats = [f.strip() for f in args.format.split(",") if f.strip()]
+    return launch(config, Path(args.out), formats, autostart=args.run)
+
+
 # --------------------------------------------------------------------------- plan
 
 
@@ -335,6 +346,14 @@ def build_parser() -> argparse.ArgumentParser:
                           "skipped, errored or crashed coverage")
     run.add_argument("--quiet", action="store_true")
     run.set_defaults(func=cmd_run)
+
+    tui = sub.add_parser("tui", help="drive a run from a full-screen terminal UI")
+    add_target_flags(tui)
+    tui.add_argument("--out", default="runs/latest", help="output directory")
+    tui.add_argument("--format", default="md,json,html", help="report formats")
+    tui.add_argument("--run", action="store_true",
+                     help="start the scan immediately instead of on the setup screen")
+    tui.set_defaults(func=cmd_tui, quiet=True)
 
     plan = sub.add_parser("plan", help="show what would run, without sending anything")
     add_target_flags(plan)
