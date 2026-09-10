@@ -363,6 +363,30 @@ def test_the_windows_installer_does_not_leak_command_output_into_its_return():
             assert "|" in stripped, f"unpiped cmd invocation: {stripped}"
 
 
+def test_the_windows_installer_does_not_trust_wingets_exit_code():
+    # Reported from a real Windows run: winget said "Found an existing package
+    # already installed / No available upgrade found" and exited 0x8A15002B
+    # (-1978335189). That is a failure to UPGRADE, not a failure to have
+    # Python — but the script stopped there and declared Python missing.
+    # Discovery must run whatever winget's exit code was, the same way
+    # install.sh re-checks the module rather than trusting apt.
+    text = INSTALL_PS1.read_text()
+    assert "looking for Python anyway" in text
+    # PEP 514 is the authoritative record of an installed Python, whoever ran
+    # the installer and whichever scope it used.
+    assert "Get-PythonFromRegistry" in text
+    assert "HKCU:\\SOFTWARE\\Python" in text and "HKLM:\\SOFTWARE\\Python" in text
+    # And when it still finds nothing, it must say where it looked.
+    assert "searched PATH, the PEP 514 registry keys" in text
+
+
+def test_the_windows_installer_offers_a_way_out_when_it_cannot_find_python():
+    # The last-resort message has to be actionable, not just "install Python".
+    text = INSTALL_PS1.read_text()
+    assert "-Python " in text
+    assert "Get-ChildItem" in text
+
+
 PWSH = shutil.which("pwsh") or shutil.which("powershell")
 powershell_only = pytest.mark.skipif(PWSH is None, reason="needs PowerShell")
 

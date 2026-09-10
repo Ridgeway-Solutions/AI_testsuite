@@ -148,23 +148,70 @@ function Install-WithConsent {
 # a shell opened before the install has none of the new entries — so after
 # installing we look on disk rather than telling the user to open a new window
 # and hoping.
-function Find-PythonOnDisk {
+# Every python.org installer records itself in the registry under PEP 514,
+# whether it was run directly or by winget, and for either scope. That is the
+# authoritative answer to "where is Python", so ask it before guessing at
+# directories.
+function Get-PythonFromRegistry {
+    $found = @()
+    foreach ($hive in 'HKCU:\SOFTWARE\Python', 'HKLM:\SOFTWARE\Python',
+                      'HKLM:\SOFTWARE\WOW6432Node\Python') {
+        $companies = Get-ChildItem $hive -ErrorAction SilentlyContinue
+        foreach ($company in $companies) {
+            foreach ($tag in (Get-ChildItem $company.PSPath -ErrorAction SilentlyContinue)) {
+                $key = Get-ItemProperty "$($tag.PSPath)\InstallPath" -ErrorAction SilentlyContinue
+                if (-not $key) { continue }
+                # The executable is named by ExecutablePath, or sits under the
+                # default value of the InstallPath key.
+                if ($key.ExecutablePath -and (Test-Path $key.ExecutablePath)) {
+                    $found += $key.ExecutablePath
+                } elseif ($key.'(default)') {
+                    $exe = Join-Path $key.'(default)' 'python.exe'
+                    if (Test-Path $exe) { $found += $exe }
+                }
+            }
+        }
+    }
+    return $found
+}
+
+# Where the installers put Python when the registry has nothing to say.
+function Get-PythonFromDisk {
     $patterns = @()
+    foreach ($root in $env:LOCALAPPDATA, $env:ProgramFiles, ${env:ProgramFiles(x86)},
+                      $env:ProgramW6432) {
+        if (-not $root) { continue }
+        $patterns += (Join-Path $root 'Programs\Python\Python3*\python.exe')
+        $patterns += (Join-Path $root 'Python3*\python.exe')
+    }
     if ($env:LOCALAPPDATA) {
-        $patterns += (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python3*\python.exe')
         $patterns += (Join-Path $env:LOCALAPPDATA 'Programs\Python\Launcher\py.exe')
     }
-    $patterns += 'C:\Program Files\Python3*\python.exe'
-    $patterns += 'C:\Program Files (x86)\Python3*\python.exe'
     if ($env:WINDIR) { $patterns += (Join-Path $env:WINDIR 'py.exe') }
 
     $found = @()
     foreach ($pattern in $patterns) {
-        $matched = Get-Item -Path $pattern -ErrorAction SilentlyContinue
-        foreach ($item in $matched) { $found += $item.FullName }
+        foreach ($item in (Get-Item -Path $pattern -ErrorAction SilentlyContinue)) {
+            $found += $item.FullName
+        }
     }
+    return $found
+}
+
+function Find-PythonOnDisk {
     # Newest first, so a box with several gets the highest version.
-    return $found | Sort-Object -Descending -Unique
+    return @(Get-PythonFromRegistry) + @(Get-PythonFromDisk) |
+        Where-Object { $_ } | Sort-Object -Descending -Unique
+}
+
+# Try every interpreter we can find that is not on PATH. Returns the first
+# usable one as @(exe, version), or $null.
+function Resolve-PythonOffPath {
+    foreach ($path in Find-PythonOnDisk) {
+        $version = Get-PyVersion -Exe $path
+        if ($version -and $version -ge $MinVersion) { return @($path, $version) }
+    }
+    return $null
 }
 
 # Run from the repository root whatever directory the user invoked us from.
@@ -242,58 +289,45 @@ if (-not $PyExe) {
         # fail with no useful message.
         $wingetCmd = 'winget install -e --id Python.Python.3.12 ' +
                      '--accept-package-agreements --accept-source-agreements'
-        if (Install-WithConsent 'Python 3.12' $wingetCmd) {
-            # PATH in THIS process still predates the install, so look on disk
-            # as well as on PATH rather than assuming a new shell is needed.
-            foreach ($candidate in $candidates) {
-                $exe, $prefix = $candidate
-                if (-not (Get-Command $exe -ErrorAction SilentlyContinue)) { continue }
-                $version = Get-PyVersion -Exe $exe -Prefix $prefix
-                if ($version -and $version -ge $MinVersion) {
-                    $PyExe = $exe; $PyArgs = $prefix; $PyVersion = $version
-                    break
-                }
-            }
-            if (-not $PyExe) {
-                foreach ($path in Find-PythonOnDisk) {
-                    $version = Get-PyVersion -Exe $path
-                    if ($version -and $version -ge $MinVersion) {
-                        $PyExe = $path; $PyArgs = @(); $PyVersion = $version
-                        Write-Note "found it at $path (not on this shell's PATH yet)"
-                        break
-                    }
-                }
-            }
-            if (-not $PyExe) {
-                Stop-With 'Python was installed, but this shell cannot find it' @(
-                    'winget only updates PATH for shells opened afterwards.',
-                    '',
-                    'Close this window, open a new PowerShell, and re-run:',
-                    '  .\install.ps1',
-                    '',
-                    'If that still fails, point the installer straight at it:',
-                    '  .\install.ps1 -Python "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe"'
-                )
-            }
-        } else {
-            # The install did not happen. Saying anything about PATH here would
-            # send the user off to reopen a shell that still has no Python.
-            Write-Note 'nothing was installed, so there is nothing new to find'
+        if (-not (Install-WithConsent 'Python 3.12' $wingetCmd)) {
+            # A non-zero exit does NOT mean Python is absent. When the package
+            # is already installed, winget reports "No applicable upgrade" and
+            # exits 0x8A15002B (-1978335189) — a failure to upgrade, not a
+            # failure to have Python. So look for an interpreter regardless,
+            # the same way install.sh trusts the re-check over the package
+            # manager's exit code.
+            Write-Note 'looking for Python anyway - "already installed" also exits non-zero'
         }
     } else {
         Write-Note 'winget is not available to install it automatically'
     }
 
-    # Whether or not winget ran, a Python already on disk but off PATH is the
-    # single most common reason this script finds nothing on Windows.
+    # One discovery pass, whatever happened above: PATH first, then the
+    # registry and the usual install directories. PATH in this process
+    # predates any install, and Get-Command only ever consults PATH.
+    foreach ($candidate in $candidates) {
+        $exe, $prefix = $candidate
+        if (-not (Get-Command $exe -ErrorAction SilentlyContinue)) { continue }
+        $version = Get-PyVersion -Exe $exe -Prefix $prefix
+        if ($version -and $version -ge $MinVersion) {
+            $PyExe = $exe; $PyArgs = $prefix; $PyVersion = $version
+            break
+        }
+    }
     if (-not $PyExe) {
-        foreach ($path in Find-PythonOnDisk) {
-            $version = Get-PyVersion -Exe $path
-            if ($version -and $version -ge $MinVersion) {
-                $PyExe = $path; $PyArgs = @(); $PyVersion = $version
-                Write-Note "found it at $path (not on this shell's PATH)"
-                break
-            }
+        $offPath = Resolve-PythonOffPath
+        if ($offPath) {
+            $PyExe = $offPath[0]; $PyArgs = @(); $PyVersion = $offPath[1]
+            Write-Note "found it at $PyExe (not on this shell's PATH)"
+        }
+    }
+
+    # Still nothing: say where we looked, so the next report is diagnosable
+    # rather than another round trip.
+    if (-not $PyExe) {
+        Write-Note 'searched PATH, the PEP 514 registry keys, and:'
+        foreach ($root in $env:LOCALAPPDATA, $env:ProgramFiles, ${env:ProgramFiles(x86)}) {
+            if ($root) { Write-Note "  $root\**\Python3*\python.exe" }
         }
     }
 }
@@ -305,7 +339,12 @@ if (-not $PyExe) {
         '  winget install Python.Python.3.12',
         '  or  https://www.python.org/downloads/',
         '',
-        'Tick "Add python.exe to PATH" in the installer.'
+        'Tick "Add python.exe to PATH" in the installer.',
+        '',
+        'If Python IS installed and this still cannot see it, find it with:',
+        '  Get-ChildItem $env:LOCALAPPDATA\Programs\Python,$env:ProgramFiles -Filter python.exe -Recurse -Depth 3 -ErrorAction SilentlyContinue | % FullName',
+        'then point this script straight at it:',
+        '  .\install.ps1 -Python "C:\path\to\python.exe"'
     )
 }
 Write-Ok "$PyExe $($PyArgs -join ' ') ($PyVersion)"
