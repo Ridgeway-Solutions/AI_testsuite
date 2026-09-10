@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from redteam.cli import main
+from llmtest.cli import main
 
 
 def test_list_attacks_names_the_control(capsys):

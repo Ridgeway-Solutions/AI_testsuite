@@ -13,12 +13,12 @@ Before a scan against anything you did not build:
 - Use a staging deployment where one exists, with test accounts and test data.
 - Set `rate_limit_rps` to something the target can absorb. The default is
   unlimited, which is fine for a mock and inconsiderate for a live service.
-- Tell whoever runs the on-call rotation. A red-team run that pages someone at
+- Tell whoever runs the on-call rotation. A scan that pages someone at
   02:00 is a bad way to introduce the programme.
 
 ## Why the built-in objectives are canaries
 
-Every objective in `src/redteam/objectives/catalog.yaml` elicits something
+Every objective in `src/llmtest/objectives/catalog.yaml` elicits something
 harmless: a marker token, a seeded fake secret, a policy contradiction, a claimed
 refund, the word "pineapple". None of them ask a model for content that is
 dangerous to have.

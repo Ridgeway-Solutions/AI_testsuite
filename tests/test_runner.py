@@ -3,12 +3,12 @@ import json
 
 import pytest
 
-from redteam.config import RunSettings, SuiteConfig
-from redteam.objectives import load_objectives, objective_from_dict
-from redteam.registry import available
-from redteam.runner import Runner, build_target, select_attacks
-from redteam.targets.base import Target
-from redteam.types import Conversation, Response, Severity
+from llmtest.config import RunSettings, SuiteConfig
+from llmtest.objectives import load_objectives, objective_from_dict
+from llmtest.registry import available
+from llmtest.runner import Runner, build_target, select_attacks
+from llmtest.targets.base import Target
+from llmtest.types import Conversation, Response, Severity
 
 CATALOG = load_objectives()
 

@@ -1,4 +1,4 @@
-"""redteam-suite — automated adversarial robustness testing for LLM applications.
+"""llm-testsuite — automated adversarial robustness testing for LLM applications.
 
 Run it only against systems you own or are explicitly authorised to test.
 """

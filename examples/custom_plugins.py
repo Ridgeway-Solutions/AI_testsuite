@@ -5,7 +5,7 @@ Wire it into a suite with::
     plugins: [examples.custom_plugins]
 
 and it registers alongside the built-ins. Run
-``redteam list attacks`` afterwards to confirm.
+``llmtest list attacks`` afterwards to confirm.
 """
 
 from __future__ import annotations
@@ -13,11 +13,11 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
-from redteam.attacks.base import Attack, AttackContext
-from redteam.detectors.base import Detector, JudgeContext
-from redteam.registry import register_attack, register_detector, register_target
-from redteam.targets.base import CAP_MULTI_TURN, Target, http_post_json
-from redteam.types import Conversation, Response
+from llmtest.attacks.base import Attack, AttackContext
+from llmtest.detectors.base import Detector, JudgeContext
+from llmtest.registry import register_attack, register_detector, register_target
+from llmtest.targets.base import CAP_MULTI_TURN, Target, http_post_json
+from llmtest.types import Conversation, Response
 
 
 # -- an attack ---------------------------------------------------------------

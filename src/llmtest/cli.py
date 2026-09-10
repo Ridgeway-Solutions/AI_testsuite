@@ -1,10 +1,10 @@
 """Command line interface.
 
-    redteam run suites/quick.yaml
-    redteam run --target-type openai --model gpt-4o-mini --attacks obfuscation,crescendo
-    redteam list attacks
-    redteam plan suites/full.yaml
-    redteam init my-app.yaml
+    llmtest run suites/quick.yaml
+    llmtest run --target-type openai --model gpt-4o-mini --attacks obfuscation,crescendo
+    llmtest list attacks
+    llmtest plan suites/full.yaml
+    llmtest init my-app.yaml
 """
 
 from __future__ import annotations
@@ -241,7 +241,7 @@ def cmd_list(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- init
 
 TEMPLATE = """\
-# Red-team suite for {name}.
+# LLM adversarial robustness suite for {name}.
 #
 # Only run this against a system you own or have written authorisation to test.
 
@@ -249,7 +249,7 @@ name: {name}
 description: Adversarial robustness scan for {name}
 
 target:
-  # Swap for: openai | anthropic | http | shell | mock  (redteam list targets)
+  # Swap for: openai | anthropic | http | shell | mock  (llmtest list targets)
   type: http
   url: https://staging.example.com/api/chat
   headers:
@@ -260,12 +260,12 @@ target:
     conversation_id: "{{{{session_id}}}}"
   response_path: data.reply
 
-# Techniques to run. "all" is the full library; see `redteam list attacks`.
+# Techniques to run. "all" is the full library; see `llmtest list attacks`.
 attacks: [all]
 
 objectives:
   # Point this at objectives written against YOUR policy. Start by copying
-  # src/redteam/objectives/catalog.yaml and editing the goals and detectors.
+  # src/llmtest/objectives/catalog.yaml and editing the goals and detectors.
   file: objectives.yaml
 
 run:
@@ -285,7 +285,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         return 2
     path.write_text(TEMPLATE.format(name=args.name or path.stem))
     print(f"wrote {path}")
-    print("next: edit the target block, then `redteam plan " + str(path) + "`")
+    print("next: edit the target block, then `llmtest plan " + str(path) + "`")
     return 0
 
 
@@ -294,11 +294,11 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="redteam",
+        prog="llmtest",
         description="Automated adversarial robustness testing for LLM applications.",
         epilog=BANNER,
     )
-    parser.add_argument("--version", action="version", version=f"redteam-suite {__version__}")
+    parser.add_argument("--version", action="version", version=f"llm-testsuite {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     def add_target_flags(p: argparse.ArgumentParser) -> None:
@@ -348,7 +348,7 @@ def build_parser() -> argparse.ArgumentParser:
     lst.set_defaults(func=cmd_list)
 
     init = sub.add_parser("init", help="scaffold a suite file for your application")
-    init.add_argument("path", nargs="?", default="redteam.yaml")
+    init.add_argument("path", nargs="?", default="llmtest.yaml")
     init.add_argument("--name")
     init.add_argument("--force", action="store_true")
     init.set_defaults(func=cmd_init)

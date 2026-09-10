@@ -1,5 +1,5 @@
-from redteam.scoring import CONFIDENCE_FLOOR, score
-from redteam.types import Attempt, Conversation, Response, Role, Severity, Turn, Verdict
+from llmtest.scoring import CONFIDENCE_FLOOR, score
+from llmtest.types import Attempt, Conversation, Response, Role, Severity, Turn, Verdict
 
 
 def attempt(attack="a", objective="o", severity=Severity.HIGH, success=True,
@@ -79,8 +79,8 @@ def test_top_attacks_ranks_by_risk():
 
 # -- per-boundary outcomes ----------------------------------------------------
 
-from redteam.objectives import objective_from_dict  # noqa: E402
-from redteam.scoring import Outcome, objective_outcomes  # noqa: E402
+from llmtest.objectives import objective_from_dict  # noqa: E402
+from llmtest.scoring import Outcome, objective_outcomes  # noqa: E402
 
 
 def obj(oid="o", severity="high"):

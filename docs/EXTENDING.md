@@ -4,16 +4,16 @@ Attacks, targets and detectors are plugins registered by decorator. Put your
 module anywhere importable and list it in your suite:
 
 ```yaml
-plugins: [myorg.redteam_plugins]
+plugins: [myorg.llmtest_plugins]
 ```
 
-Or drop a file into `src/redteam/attacks/` and it is discovered automatically.
+Or drop a file into `src/llmtest/attacks/` and it is discovered automatically.
 
 ## A new attack technique
 
 ```python
-from redteam.attacks.base import Attack, AttackContext
-from redteam.registry import register_attack
+from llmtest.attacks.base import Attack, AttackContext
+from llmtest.registry import register_attack
 
 @register_attack("policy_citation")
 class PolicyCitation(Attack):
@@ -65,9 +65,9 @@ so an adaptive attack sees the same `Attempt` the report will.
 ## A new target
 
 ```python
-from redteam.registry import register_target
-from redteam.targets.base import CAP_MULTI_TURN, Target, http_post_json
-from redteam.types import Conversation, Response
+from llmtest.registry import register_target
+from llmtest.targets.base import CAP_MULTI_TURN, Target, http_post_json
+from llmtest.types import Conversation, Response
 
 @register_target("myapp")
 class MyAppTarget(Target):
@@ -95,8 +95,8 @@ covers your endpoint's shape.
 ## A new detector
 
 ```python
-from redteam.detectors.base import Detector, JudgeContext
-from redteam.registry import register_detector
+from llmtest.detectors.base import Detector, JudgeContext
+from llmtest.registry import register_detector
 
 @register_detector("pii")
 class PIIDetector(Detector):
