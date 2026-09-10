@@ -50,6 +50,51 @@ jobs:
       - name: re-running is safe
         run: ./install.sh
 
+  install-powershell:
+    # install.ps1 shipped twice without ever being executed, and the second
+    # time it carried a real bug. PowerShell runs on Linux too, so this covers
+    # the script on both — windows-latest is the one that actually matters.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: it parses
+        shell: pwsh
+        run: |
+          $errs = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path ./install.ps1).Path, [ref]$null, [ref]$errs) | Out-Null
+          if ($errs) { $errs | ForEach-Object { $_.Message }; throw 'parse errors' }
+
+      - name: -Check changes nothing
+        shell: pwsh
+        run: |
+          ./install.ps1 -Check
+          if (Test-Path .venv) { throw '-Check created a venv' }
+
+      - name: install for real
+        shell: pwsh
+        run: ./install.ps1 -Dev
+
+      - name: the installed environment works
+        shell: pwsh
+        run: |
+          $py = if ($IsWindows) { '.venv/Scripts/python.exe' } else { '.venv/bin/python' }
+          & $py -m llmtest --version
+          if ($LASTEXITCODE -ne 0) { throw 'llmtest --version failed' }
+          & $py -m llmtest plan suites/quick.yaml
+          if ($LASTEXITCODE -ne 0) { throw 'plan failed' }
+          & $py -m pytest -q
+          if ($LASTEXITCODE -ne 0) { throw 'pytest failed' }
+
+      - name: re-running is safe
+        shell: pwsh
+        run: ./install.ps1
+
   self-scan:
     # Runs the suite end to end against the offline mock: no credentials, no
     # network, no spend. Catches breakage the unit tests would not.

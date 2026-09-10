@@ -58,6 +58,16 @@ param(
 $ErrorActionPreference = 'Stop'
 $MinVersion = [Version]'3.10'
 
+# This is a Windows installer, but PowerShell runs everywhere — and a script
+# that cannot run outside Windows cannot be tested outside Windows, which is
+# exactly how a bug shipped here before. Deriving the few platform-specific
+# bits lets CI exercise the whole thing under pwsh on Linux.
+# $IsWindows does not exist in Windows PowerShell 5.1, which only runs on
+# Windows, so its absence means Windows.
+$OnWindows = (-not (Test-Path variable:IsWindows)) -or $IsWindows
+$VenvBin = if ($OnWindows) { 'Scripts' } else { 'bin' }
+$ExeSuffix = if ($OnWindows) { '.exe' } else { '' }
+
 function Write-Ok    { param($m) Write-Host "  [ok] $m"   -ForegroundColor Green }
 function Write-Warn  { param($m) Write-Host "  [!]  $m"   -ForegroundColor Yellow }
 function Write-Bad   { param($m) Write-Host "  [x] $m"    -ForegroundColor Red }
@@ -117,12 +127,44 @@ function Install-WithConsent {
         return $false
     }
     Write-Host ''
-    & cmd /c $Command
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warn 'that command failed'
+    # Route the command's output to the host, not to the pipeline.
+    #
+    # A PowerShell function returns everything left on its output stream, so a
+    # bare `& cmd /c $Command` makes this function return [winget's output
+    # lines..., $false]. A non-empty array is truthy, so `if
+    # (Install-WithConsent ...)` then took the success branch even when the
+    # install had failed — and the output the user needed in order to see why
+    # was swallowed as the return value instead of printed.
+    & cmd /c $Command 2>&1 | ForEach-Object { Write-Host "  $_" }
+    $code = $LASTEXITCODE
+    if ($code -ne 0) {
+        Write-Warn "that command failed (exit code $code)"
         return $false
     }
     return $true
+}
+
+# Where Windows actually puts Python. Get-Command only ever looks at PATH, and
+# a shell opened before the install has none of the new entries — so after
+# installing we look on disk rather than telling the user to open a new window
+# and hoping.
+function Find-PythonOnDisk {
+    $patterns = @()
+    if ($env:LOCALAPPDATA) {
+        $patterns += (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python3*\python.exe')
+        $patterns += (Join-Path $env:LOCALAPPDATA 'Programs\Python\Launcher\py.exe')
+    }
+    $patterns += 'C:\Program Files\Python3*\python.exe'
+    $patterns += 'C:\Program Files (x86)\Python3*\python.exe'
+    if ($env:WINDIR) { $patterns += (Join-Path $env:WINDIR 'py.exe') }
+
+    $found = @()
+    foreach ($pattern in $patterns) {
+        $matched = Get-Item -Path $pattern -ErrorAction SilentlyContinue
+        foreach ($item in $matched) { $found += $item.FullName }
+    }
+    # Newest first, so a box with several gets the highest version.
+    return $found | Sort-Object -Descending -Unique
 }
 
 # Run from the repository root whatever directory the user invoked us from.
@@ -195,9 +237,14 @@ if (-not $PyExe) {
     else { Write-Bad 'no python interpreter found' }
 
     if (Get-Command winget -ErrorAction SilentlyContinue) {
-        if (Install-WithConsent 'Python 3.12' 'winget install -e --id Python.Python.3.12') {
-            Write-Note 'winget updates PATH for new shells only'
-            # Re-run the same search rather than assuming what landed where.
+        # The two --accept flags matter: without them winget stops on its
+        # source and package agreements, which is a common way for this to
+        # fail with no useful message.
+        $wingetCmd = 'winget install -e --id Python.Python.3.12 ' +
+                     '--accept-package-agreements --accept-source-agreements'
+        if (Install-WithConsent 'Python 3.12' $wingetCmd) {
+            # PATH in THIS process still predates the install, so look on disk
+            # as well as on PATH rather than assuming a new shell is needed.
             foreach ($candidate in $candidates) {
                 $exe, $prefix = $candidate
                 if (-not (Get-Command $exe -ErrorAction SilentlyContinue)) { continue }
@@ -208,13 +255,46 @@ if (-not $PyExe) {
                 }
             }
             if (-not $PyExe) {
-                Stop-With 'Python installed, but not visible in this shell yet' @(
-                    'Close this window, open a new one, and re-run .\install.ps1'
+                foreach ($path in Find-PythonOnDisk) {
+                    $version = Get-PyVersion -Exe $path
+                    if ($version -and $version -ge $MinVersion) {
+                        $PyExe = $path; $PyArgs = @(); $PyVersion = $version
+                        Write-Note "found it at $path (not on this shell's PATH yet)"
+                        break
+                    }
+                }
+            }
+            if (-not $PyExe) {
+                Stop-With 'Python was installed, but this shell cannot find it' @(
+                    'winget only updates PATH for shells opened afterwards.',
+                    '',
+                    'Close this window, open a new PowerShell, and re-run:',
+                    '  .\install.ps1',
+                    '',
+                    'If that still fails, point the installer straight at it:',
+                    '  .\install.ps1 -Python "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe"'
                 )
             }
+        } else {
+            # The install did not happen. Saying anything about PATH here would
+            # send the user off to reopen a shell that still has no Python.
+            Write-Note 'nothing was installed, so there is nothing new to find'
         }
     } else {
         Write-Note 'winget is not available to install it automatically'
+    }
+
+    # Whether or not winget ran, a Python already on disk but off PATH is the
+    # single most common reason this script finds nothing on Windows.
+    if (-not $PyExe) {
+        foreach ($path in Find-PythonOnDisk) {
+            $version = Get-PyVersion -Exe $path
+            if ($version -and $version -ge $MinVersion) {
+                $PyExe = $path; $PyArgs = @(); $PyVersion = $version
+                Write-Note "found it at $path (not on this shell's PATH)"
+                break
+            }
+        }
     }
 }
 
@@ -261,7 +341,8 @@ if ($LASTEXITCODE -eq 0) {
 # Only the terminal UI needs it - `llmtest run` works without.
 $HasCurses = Test-PyModule 'curses'
 if ($HasCurses) { Write-Ok 'curses (terminal UI available)' }
-else { Write-Warn 'curses missing - will install windows-curses for the terminal UI' }
+elseif ($OnWindows) { Write-Warn 'curses missing - will install windows-curses for the terminal UI' }
+else { Write-Warn "curses missing - 'llmtest tui' unavailable, 'llmtest run' still works" }
 
 # --------------------------------------------------------------- check mode
 
@@ -279,7 +360,7 @@ if ($Check) {
 
 if (-not $NoVenv) {
     Write-Step 'Virtual environment'
-    $VenvPy = Join-Path $Venv 'Scripts\python.exe'
+    $VenvPy = Join-Path $Venv (Join-Path $VenvBin "python$ExeSuffix")
     if (Test-Path $VenvPy) {
         Write-Ok "reusing $Venv"
     } else {
@@ -338,7 +419,7 @@ Write-Ok 'llm-testsuite installed (editable - your edits take effect immediately
 if ($Dev) { Write-Ok 'test dependencies installed' }
 
 Invoke-VenvPy @('-c', 'import curses') 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) {
+if ($LASTEXITCODE -ne 0 -and $OnWindows) {
     Invoke-VenvPy @('-m', 'pip', 'install', '--quiet', 'windows-curses') 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) {
         Write-Ok 'windows-curses installed (terminal UI available)'
@@ -347,6 +428,9 @@ if ($LASTEXITCODE -ne 0) {
         Write-Warn "windows-curses failed to install - 'llmtest tui' will be unavailable"
         $HasCurses = $false
     }
+} elseif ($LASTEXITCODE -ne 0) {
+    Write-Warn "no curses - use 'llmtest run'; the terminal UI needs it"
+    $HasCurses = $false
 } else {
     $HasCurses = $true
 }
@@ -382,7 +466,9 @@ Write-Host "`nDone.`n" -ForegroundColor Green
 
 if (-not $NoVenv) {
     Write-Host 'Activate the environment:'
-    Write-Host "`n    .\$Venv\Scripts\Activate.ps1`n" -ForegroundColor White
+    $activate = if ($OnWindows) { ".\$Venv\Scripts\Activate.ps1" }
+                else { "./$Venv/bin/Activate.ps1" }
+    Write-Host "`n    $activate`n" -ForegroundColor White
     Write-Host 'Then start it:'
 } else {
     Write-Host 'Start it:'
@@ -398,4 +484,4 @@ Write-Host '    llmtest --help'
 Write-Host ''
 Write-Note 'Both commands run against a built-in offline mock: no credentials, no'
 Write-Note 'network, no spend. Only run against a real system you own or have'
-Write-Note 'written permission to test - see docs\ETHICS.md.'
+Write-Note "written permission to test - see $(if ($OnWindows) {'docs\ETHICS.md'} else {'docs/ETHICS.md'})."

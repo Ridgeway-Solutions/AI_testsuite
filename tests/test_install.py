@@ -333,7 +333,8 @@ def test_the_windows_installer_is_present():
 
 def test_the_windows_installer_covers_the_same_ground():
     text = INSTALL_PS1.read_text()
-    for flag in ("$NoVenv", "$Dev", "$Check", "$Python", "$Venv"):
+    for flag in ("$NoVenv", "$Dev", "$Check", "$Python", "$Venv", "$Yes",
+                 "$NoInstallDeps"):
         assert flag in text
     # curses is the one dependency Windows needs that other platforms do not.
     assert "windows-curses" in text
@@ -342,3 +343,66 @@ def test_the_windows_installer_covers_the_same_ground():
     # Execution policy blocks unsigned scripts and is the first thing a Windows
     # user hits; the header has to say so.
     assert "ExecutionPolicy" in text
+
+
+def test_the_windows_installer_does_not_leak_command_output_into_its_return():
+    # The bug this guards against: a PowerShell function returns everything
+    # left on its output stream, so a bare `& cmd /c $Command` made
+    # Install-WithConsent return [winget's output..., $false]. A non-empty
+    # array is truthy, so `if (Install-WithConsent ...)` took the success
+    # branch after a FAILED install and told the user to reopen their shell to
+    # find a Python that had never been installed.
+    text = INSTALL_PS1.read_text()
+    assert "& cmd /c $Command 2>&1 | ForEach-Object { Write-Host" in text, (
+        "cmd output must go to the host, not the pipeline"
+    )
+    # Nothing may invoke cmd without redirecting its output.
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("& cmd /c"):
+            assert "|" in stripped, f"unpiped cmd invocation: {stripped}"
+
+
+PWSH = shutil.which("pwsh") or shutil.which("powershell")
+powershell_only = pytest.mark.skipif(PWSH is None, reason="needs PowerShell")
+
+
+@powershell_only
+def test_the_windows_installer_parses():
+    # A syntax error would only ever surface on a user's machine otherwise.
+    script = (
+        "$errs = $null; "
+        f"[System.Management.Automation.Language.Parser]::ParseFile('{INSTALL_PS1}', "
+        "[ref]$null, [ref]$errs) | Out-Null; "
+        "if ($errs) { $errs | ForEach-Object { $_.Message }; exit 1 }; exit 0"
+    )
+    result = subprocess.run([PWSH, "-NoProfile", "-Command", script],
+                            capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@powershell_only
+def test_the_windows_installer_check_mode_changes_nothing(tmp_path):
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-File", str(INSTALL_PS1), "-Check",
+         "-Venv", str(tmp_path / "unused")],
+        cwd=ROOT, capture_output=True, text=True, timeout=300,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "nothing was changed" in result.stdout
+    assert not (tmp_path / "unused").exists()
+
+
+@powershell_only
+def test_the_windows_installer_will_not_delete_a_non_venv(tmp_path):
+    precious = tmp_path / "not-a-venv"
+    precious.mkdir()
+    (precious / "important.txt").write_text("keep me")
+
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-File", str(INSTALL_PS1), "-Venv", str(precious)],
+        cwd=ROOT, capture_output=True, text=True, timeout=300,
+    )
+    assert result.returncode != 0
+    assert "not a virtual environment" in result.stdout
+    assert (precious / "important.txt").read_text() == "keep me"
