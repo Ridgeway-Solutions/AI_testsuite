@@ -472,8 +472,16 @@ def test_the_windows_installer_rejects_a_nonexistent_explicit_python(tmp_path):
 
 
 @powershell_only
-def test_the_windows_installer_accepts_an_explicit_python_with_spaces(tmp_path):
-    # Windows home directories routinely contain a space.
+def test_a_spaced_explicit_python_path_is_found_not_mangled(tmp_path):
+    # Windows home directories routinely contain a space — the reporter's was
+    # "C:\Users\Matthew James\..." — so a space must not break the path
+    # handling in Test-Path -LiteralPath and `& $Exe`.
+    #
+    # This deliberately does not require the copied file to RUN. A lone
+    # python.exe on Windows has neither its DLLs nor its stdlib beside it, so
+    # it cannot start; asserting a successful run here only tested that the
+    # copy happened to work on Linux. What matters is that the path was
+    # resolved: reaching the version check at all proves the space survived.
     spaced = tmp_path / "Matthew James" / "Python312"
     spaced.mkdir(parents=True)
     exe = spaced / ("python.exe" if sys.platform == "win32" else "python")
@@ -484,5 +492,11 @@ def test_the_windows_installer_accepts_an_explicit_python_with_spaces(tmp_path):
          "-Python", str(exe), "-Venv", str(tmp_path / "unused")],
         cwd=ROOT, capture_output=True, text=True, timeout=300,
     )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert str(exe) in result.stdout
+    output = result.stdout + result.stderr
+    # The file was located despite the space: not confused with a missing one.
+    assert "no such interpreter" not in output, output
+    assert "does not exist" not in output, output
+    assert str(exe) in output, output
+    # And an explicit -Python never wanders off into the search or winget.
+    assert "no python interpreter found" not in output, output
+    assert "can be installed with" not in output, output
