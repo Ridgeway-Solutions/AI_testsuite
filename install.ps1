@@ -261,14 +261,78 @@ Write-Ok "llm-testsuite checkout at $Root"
 
 Write-Step "Python $MinVersion or newer"
 
+# Why each interpreter was rejected, keyed by the command that was tried. The
+# not-found diagnostic reads this: "did not run", on its own, left a reporter
+# unable to tell a broken install from a broken probe - which is exactly what
+# it turned out to be.
+$script:ProbeNotes = @{}
+
+function Get-Excerpt {
+    param([string[]] $Lines, [int] $Max = 110)
+    $line = @($Lines | Where-Object { $_ -and $_.Trim() } | Select-Object -First 1)
+    if (-not $line) { return '' }
+    $text = "$($line[0])".Trim()
+    if ($text.Length -gt $Max) { $text = $text.Substring(0, $Max) + '...' }
+    return $text
+}
+
 function Get-PyVersion {
     param([string] $Exe, [string[]] $Prefix = @())
-    try {
-        $argv = $Prefix + @('-c', 'import sys; print("%d.%d.%d" % sys.version_info[:3])')
-        $out = & $Exe @argv 2>$null
-        if ($LASTEXITCODE -ne 0 -or -not $out) { return $null }
-        return [Version](($out | Select-Object -First 1).Trim())
-    } catch { return $null }
+
+    # Ask with --version, and never with a quoted -c payload.
+    #
+    # This used to run: -c "import sys; print("%d.%d.%d" % sys.version_info[:3])"
+    # Windows PowerShell 5.1 - which is what `powershell -File .\install.ps1`
+    # starts, and what this script's own header tells people to run - passes an
+    # argument's embedded double quotes through to a native command unescaped.
+    # Python received a syntactically broken payload, exited non-zero, and so
+    # EVERY interpreter on the machine was rejected: a reporter with a working
+    # 3.12 and 3.14 installed was told no Python could be found, then offered
+    # winget. pwsh 7.3+ escapes the quotes correctly, which is why CI - which
+    # runs pwsh - never saw it.
+    #
+    # --version needs no quoting at all. The -c fallback is quote-free for the
+    # same reason, and only exists in case a launcher swallows --version.
+    $key = (@($Exe) + $Prefix) -join ' '
+
+    # A native command writing to stderr is itself a terminating error while
+    # $ErrorActionPreference is Stop. Assigning here is function-scoped, so
+    # nothing outside this probe loosens.
+    $ErrorActionPreference = 'Continue'
+
+    $attempts = @(
+        ,@('--version')
+        ,@('-c', 'import sys; print(sys.version.split()[0])')
+    )
+
+    $why = $null
+    foreach ($attempt in $attempts) {
+        try {
+            $argv = $Prefix + $attempt
+            $out = & $Exe @argv 2>&1
+            $code = $LASTEXITCODE
+            $lines = @($out | ForEach-Object { "$_" })
+            $text = ($lines -join ' ').Trim()
+            if ($code -ne 0) {
+                if (-not $why) {
+                    $excerpt = Get-Excerpt -Lines $lines
+                    $why = "exit code $code" + $(if ($excerpt) { ": $excerpt" } else { '' })
+                }
+                continue
+            }
+            $match = [regex]::Match($text, '\d+\.\d+(\.\d+)?')
+            if (-not $match.Success) {
+                if (-not $why) { $why = "no version in its output: $(Get-Excerpt -Lines $lines)" }
+                continue
+            }
+            $script:ProbeNotes.Remove($key)
+            return [Version] $match.Value
+        } catch {
+            if (-not $why) { $why = $_.Exception.Message }
+        }
+    }
+    $script:ProbeNotes[$key] = $(if ($why) { $why } else { 'produced no output' })
+    return $null
 }
 
 # Each candidate is an executable plus any launcher arguments. The `py` launcher
@@ -296,6 +360,8 @@ if ($Python) {
     if (-not $explicit) {
         Write-Bad "$Python exists but did not report a version"
         Stop-With "-Python is not a usable interpreter" @(
+            "it said: $($script:ProbeNotes[$Python])",
+            '',
             'It may be the Microsoft Store stub, or a broken install. Try:',
             "  & '$Python' --version"
         )
@@ -377,13 +443,23 @@ if (-not $PyExe) {
         if ($registered) {
             Write-Note 'the registry names these, but they could not be used:'
             foreach ($entry in $registered) {
-                $state = if (Test-Path -LiteralPath $entry) { 'exists but did not run' }
-                         else { 'RECORDED BUT MISSING FROM DISK' }
+                $state = if (-not (Test-Path -LiteralPath $entry)) {
+                             'RECORDED BUT MISSING FROM DISK'
+                         } elseif ($script:ProbeNotes.ContainsKey($entry)) {
+                             'on disk, but ' + $script:ProbeNotes[$entry]
+                         } else {
+                             'on disk, and not tried'
+                         }
                 Write-Note "  $entry  ($state)"
             }
             Write-Note 'a missing file usually means it was uninstalled outside winget'
         } else {
             Write-Note 'no Python is recorded in the PEP 514 registry keys at all'
+        }
+        $rest = @($script:ProbeNotes.Keys | Where-Object { $_ -notin $registered } | Sort-Object)
+        if ($rest) {
+            Write-Note 'also tried, and why each was rejected:'
+            foreach ($entry in $rest) { Write-Note "  $entry  ($($script:ProbeNotes[$entry]))" }
         }
         Write-Note 'searched PATH, the registry, and:'
         foreach ($root in $env:LOCALAPPDATA, $env:ProgramFiles, ${env:ProgramFiles(x86)}) {
