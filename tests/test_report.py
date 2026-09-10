@@ -3,13 +3,13 @@ import json
 
 import pytest
 
-from redteam.config import SuiteConfig
-from redteam.objectives import load_objectives
-from redteam.report import write_reports
-from redteam.report.html import render_html
-from redteam.report.json_report import render_json
-from redteam.report.markdown import render_markdown
-from redteam.runner import Runner
+from llmtest.config import SuiteConfig
+from llmtest.objectives import load_objectives
+from llmtest.report import write_reports
+from llmtest.report.html import render_html
+from llmtest.report.json_report import render_json
+from llmtest.report.markdown import render_markdown
+from llmtest.runner import Runner
 
 
 def make_result(profile="vulnerable", attacks=("direct", "obfuscation", "persona")):
@@ -62,7 +62,7 @@ def test_markdown_reports_skipped_coverage():
 
 def test_json_report_is_valid_and_carries_a_schema_version():
     data = json.loads(render_json(RESULT))
-    assert data["schema"] == "redteam-suite/run/1"
+    assert data["schema"] == "llm-testsuite/run/1"
     for key in ("suite", "target", "summary", "findings", "skipped", "duration_s"):
         assert key in data
 
@@ -91,7 +91,7 @@ def test_html_is_self_contained():
 def test_html_escapes_attacker_controlled_text():
     """Payloads and responses are hostile input. A report that renders them raw
     is an XSS vector aimed at whoever reads the results."""
-    from redteam.types import Attempt, Conversation, Response, Role, Severity, Turn, Verdict
+    from llmtest.types import Attempt, Conversation, Response, Role, Severity, Turn, Verdict
 
     hostile = "<script>alert('xss')</script><img src=x onerror=alert(1)>"
     result = make_result()
@@ -160,7 +160,7 @@ def test_a_fully_hardened_run_shows_every_boundary_passing():
 
 def test_untested_boundaries_are_reported_separately_from_passes():
     """A boundary the suite could not reach must never read as a pass."""
-    from redteam.scoring import Outcome, objective_outcomes
+    from llmtest.scoring import Outcome, objective_outcomes
 
     result = make_result()
     result.objectives.append(

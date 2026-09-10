@@ -1,12 +1,12 @@
 import asyncio
 import sys
 
-from redteam.targets.anthropic import _merge_consecutive
-from redteam.targets.base import dig
-from redteam.targets.http_json import _fill
-from redteam.targets.mock import MockTarget
-from redteam.targets.shell import ShellTarget, _render_transcript
-from redteam.types import Conversation, Role, Turn
+from llmtest.targets.anthropic import _merge_consecutive
+from llmtest.targets.base import dig
+from llmtest.targets.http_json import _fill
+from llmtest.targets.mock import MockTarget
+from llmtest.targets.shell import ShellTarget, _render_transcript
+from llmtest.types import Conversation, Role, Turn
 
 
 def ask(target, text, turns=None):
@@ -104,7 +104,7 @@ def test_anthropic_merges_consecutive_same_role_turns():
 
 
 def test_describe_never_exposes_credentials():
-    from redteam.targets.openai_compat import OpenAICompatTarget
+    from llmtest.targets.openai_compat import OpenAICompatTarget
 
     info = OpenAICompatTarget(api_key="sk-live-secret", model="m").describe()
     assert "sk-live-secret" not in str(info)

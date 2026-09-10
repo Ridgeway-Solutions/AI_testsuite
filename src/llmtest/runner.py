@@ -137,6 +137,16 @@ class Runner:
         self._criticals = 0
         self._stream = None
 
+    def request_stop(self) -> None:
+        """Wind the run down after the payloads already in flight.
+
+        Attempts already recorded stay recorded and the result is marked
+        ``stopped_early``, so an interrupted scan reports the coverage it did
+        get rather than nothing. Not thread-safe on its own: call it through
+        ``loop.call_soon_threadsafe`` from outside the runner's event loop.
+        """
+        self._stop.set()
+
     def _objectives_without_detectors(self) -> list[str]:
         return [o.id for o in self.objectives if not o.detectors]
 
@@ -251,6 +261,13 @@ class Runner:
             error = RunError(attack.id, objective.id, redact(repr(exc)))
             result.errors.append(error)
             self.on_event("attack_error", error.to_dict())
+        finally:
+            # Pair-level completion, so a display can show real progress. The
+            # attempt total is not knowable up front: adaptive techniques decide
+            # how many payloads to send as they go, but the pair count is fixed
+            # by plan(). Emitted for crashed pairs too — a pair that died is
+            # still a pair that will send nothing more.
+            self.on_event("pair_end", {"attack": attack.id, "objective": objective.id})
 
     async def _execute(
         self, attack: Attack, objective: Objective, conversation: Conversation, result: RunResult

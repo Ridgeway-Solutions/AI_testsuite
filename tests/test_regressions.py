@@ -11,15 +11,15 @@ import sys
 
 import pytest
 
-from redteam.attacks.base import AttackContext
-from redteam.detectors.base import JudgeContext, judge_all
-from redteam.detectors.refusal import NotRefusalDetector
-from redteam.registry import available
-from redteam.scoring import CONFIDENCE_FLOOR, Outcome, objective_outcomes, score
-from redteam.targets.mock import MockTarget
-from redteam.targets.openai_compat import OpenAICompatTarget
-from redteam.targets.shell import ShellTarget, _render_transcript
-from redteam.types import Conversation, Objective, Response, Role, Severity, Turn
+from llmtest.attacks.base import AttackContext
+from llmtest.detectors.base import JudgeContext, judge_all
+from llmtest.detectors.refusal import NotRefusalDetector
+from llmtest.registry import available
+from llmtest.scoring import CONFIDENCE_FLOOR, Outcome, objective_outcomes, score
+from llmtest.targets.mock import MockTarget
+from llmtest.targets.openai_compat import OpenAICompatTarget
+from llmtest.targets.shell import ShellTarget, _render_transcript
+from llmtest.types import Conversation, Objective, Response, Role, Severity, Turn
 
 
 def ctx(text, **kw):
@@ -58,7 +58,7 @@ def test_tool_probes_drop_tool_metadata_when_degraded_to_a_user_turn():
 
     async def send(conversation):
         sent.append(conversation)
-        from redteam.types import Attempt
+        from llmtest.types import Attempt
 
         return Attempt("x", "o", conversation, Response(text="ok"))
 
@@ -80,7 +80,7 @@ async def _drain(attack, ctx_):
 def test_null_content_is_an_error_not_a_silent_empty_answer():
     """A null completion scored as an empty reply reads as a confident
     over-refusal, inventing a finding out of a broken response."""
-    from redteam.targets.base import dig
+    from llmtest.targets.base import dig
 
     body = {"choices": [{"message": {"content": None}, "finish_reason": "stop"}]}
     assert dig(body, "choices.0.message.content") is None
@@ -91,7 +91,7 @@ def test_null_content_is_an_error_not_a_silent_empty_answer():
 
 
 def _errored_attempt():
-    from redteam.types import Attempt, Verdict
+    from llmtest.types import Attempt, Verdict
 
     return Attempt(
         attack_id="direct",
@@ -141,8 +141,8 @@ def test_an_objective_with_no_detectors_can_still_produce_a_finding():
 
 
 def test_crescendo_backoff_keys_off_the_refusal_signal_not_bare_failure():
-    from redteam.attacks.multiturn import _refused
-    from redteam.types import Attempt
+    from llmtest.attacks.multiturn import _refused
+    from llmtest.types import Attempt
 
     import random
 
@@ -181,14 +181,14 @@ def test_shell_target_carries_the_configured_system_prompt():
 def test_http_target_with_a_system_prompt_can_host_a_canary():
     """Granting system_prompt without seeding skipped every confidentiality
     objective, while telling the user to set the prompt they had already set."""
-    from redteam.targets.http_json import HttpJsonTarget
+    from llmtest.targets.http_json import HttpJsonTarget
 
     target = HttpJsonTarget(url="http://x", supports_system_prompt=True, system_prompt="s")
     assert {"system_prompt", "seeding"} <= target.capabilities
 
 
 def test_anthropic_strips_trailing_whitespace_from_a_prefill_turn():
-    from redteam.targets.anthropic import AnthropicTarget
+    from llmtest.targets.anthropic import AnthropicTarget
 
     target = AnthropicTarget(model="m")
     conv = Conversation(turns=[Turn(Role.USER, "q"), Turn(Role.ASSISTANT, "```\n")])
@@ -198,7 +198,7 @@ def test_anthropic_strips_trailing_whitespace_from_a_prefill_turn():
         captured.update(payload)
         return {"content": [{"text": "ok"}]}, 1.0
 
-    import redteam.targets.anthropic as mod
+    import llmtest.targets.anthropic as mod
 
     original = mod.http_post_json
     mod.http_post_json = fake_post
@@ -214,7 +214,7 @@ def test_anthropic_strips_trailing_whitespace_from_a_prefill_turn():
 
 def test_scoreboard_reports_results_by_category():
     """by_category was serialised into every report but never populated."""
-    from redteam.types import Attempt, Verdict
+    from llmtest.types import Attempt, Verdict
 
     board = score([Attempt(
         attack_id="a", objective_id="o",
@@ -227,7 +227,7 @@ def test_scoreboard_reports_results_by_category():
 
 
 def test_a_boundary_whose_technique_crashed_is_flagged_as_partial():
-    from redteam.types import Attempt
+    from llmtest.types import Attempt
 
     objective = Objective(id="o", goal="g")
     board = score([Attempt("a", "o", Conversation(turns=[Turn(Role.USER, "x")]),

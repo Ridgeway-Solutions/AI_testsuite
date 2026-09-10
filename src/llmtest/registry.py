@@ -63,10 +63,10 @@ def load_plugins(extra_modules: Iterable[str] = ()) -> None:
     global _loaded
     if not _loaded:
         for sub in ("targets", "attacks", "detectors"):
-            pkg = importlib.import_module(f"redteam.{sub}")
+            pkg = importlib.import_module(f"llmtest.{sub}")
             for mod in pkgutil.iter_modules(pkg.__path__):
                 if not mod.name.startswith("_"):
-                    importlib.import_module(f"redteam.{sub}.{mod.name}")
+                    importlib.import_module(f"llmtest.{sub}.{mod.name}")
         _loaded = True
     extra = list(extra_modules)
     if extra:

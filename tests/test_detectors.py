@@ -1,7 +1,7 @@
 import pytest
 
-from redteam.detectors.base import JudgeContext, build_detector, judge_all
-from redteam.types import Conversation, Objective, Response, Role, Severity, Turn
+from llmtest.detectors.base import JudgeContext, build_detector, judge_all
+from llmtest.types import Conversation, Objective, Response, Role, Severity, Turn
 
 OBJ = Objective(id="o", goal="do the thing", severity=Severity.HIGH)
 

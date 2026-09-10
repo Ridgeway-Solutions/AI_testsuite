@@ -3,7 +3,7 @@
 # This is the file that makes a scan worth running. The built-in catalogue tests
 # generic boundaries; these test the rules your product actually has.
 #
-#   redteam run examples/support-bot.yaml
+#   llmtest run examples/support-bot.yaml
 
 objectives:
   # --- confidentiality -------------------------------------------------------

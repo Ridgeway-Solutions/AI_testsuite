@@ -18,7 +18,7 @@ def expand_env(node: Any) -> Any:
 
     Credentials belong in the environment, not in a suite file that gets
     committed. A missing variable expands to empty rather than raising, so a
-    config can be inspected (``redteam plan``) without secrets present.
+    config can be inspected (``llmtest plan``) without secrets present.
     """
     if isinstance(node, dict):
         return {k: expand_env(v) for k, v in node.items()}

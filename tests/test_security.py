@@ -10,17 +10,17 @@ import json
 
 import pytest
 
-from redteam.config import SuiteConfig
-from redteam.report.html import render_html
-from redteam.report.markdown import render_markdown
-from redteam.report.json_report import render_json
-from redteam.registry import load_plugins
-from redteam.runner import Runner
-from redteam.targets.base import Target, TargetError, http_post_json
-from redteam.targets.http_json import HttpJsonTarget
-from redteam.targets.openai_compat import OpenAICompatTarget
-from redteam.types import Conversation, Response, Role, Turn
-from redteam.util import redact_tree, safe_url
+from llmtest.config import SuiteConfig
+from llmtest.report.html import render_html
+from llmtest.report.markdown import render_markdown
+from llmtest.report.json_report import render_json
+from llmtest.registry import load_plugins
+from llmtest.runner import Runner
+from llmtest.targets.base import Target, TargetError, http_post_json
+from llmtest.targets.http_json import HttpJsonTarget
+from llmtest.targets.openai_compat import OpenAICompatTarget
+from llmtest.types import Conversation, Response, Role, Turn
+from llmtest.util import redact_tree, safe_url
 
 SECRET = "glpat-SUPERSECRETVALUE123456"
 

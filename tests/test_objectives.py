@@ -1,9 +1,9 @@
 import pytest
 import yaml
 
-from redteam.detectors.base import build_detector
-from redteam.objectives import CATALOG, filter_objectives, load_objectives, objective_from_dict
-from redteam.types import Severity
+from llmtest.detectors.base import build_detector
+from llmtest.objectives import CATALOG, filter_objectives, load_objectives, objective_from_dict
+from llmtest.types import Severity
 
 OBJECTIVES = load_objectives()
 

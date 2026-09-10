@@ -1,4 +1,4 @@
-from redteam.types import Attempt, Conversation, Response, Role, Severity, Turn, Verdict
+from llmtest.types import Attempt, Conversation, Response, Role, Severity, Turn, Verdict
 
 
 def make(**kw):

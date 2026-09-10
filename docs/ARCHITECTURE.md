@@ -47,6 +47,11 @@ findings.
 
 **`report/`** renders Markdown, HTML and JSON from the same scoreboard.
 
+**`tui/`** is the terminal UI. `tui/state.py` holds every decision about what is
+on screen and knows nothing about curses; `tui/app.py` owns the screen, the
+keyboard and the worker thread a scan runs on. Splitting them that way is what
+makes the interesting half testable without a terminal.
+
 ## Decisions worth knowing about
 
 **Concurrency is bounded per request, not per pair.** Pairs run concurrently and
@@ -63,6 +68,20 @@ reported as an `attack_error` event, and the rest of the plan continues.
 **Confidence is first-class.** Detectors report how sure they are and the
 scoreboard holds hits below `CONFIDENCE_FLOOR` out of the findings list. The
 refusal detector caps itself at 0.6 because "did not refuse" is weak evidence.
+
+**The UI never touches the runner's data structures.** A scan is asyncio and a
+screen is a blocking read loop, so the run owns a worker thread and reports
+through a queue that the draw loop drains between frames. The views are built
+from the serialised event payloads rather than from the live `RunResult`:
+iterating a list another thread is appending to is a race, and the payloads
+already carry everything a view needs. The only call in the other direction is
+`Runner.request_stop`, through `loop.call_soon_threadsafe`.
+
+**An in-progress boundary is never drawn as a pass.** Mid-run the boundaries
+view shows live tallies and no verdict at all. `PASS`/`FAIL` appear only once
+the run has finished and `objective_outcomes` has spoken, for the same reason
+the reports distinguish `NOT RUN` from `PASS`: a boundary nothing has reached
+*yet* is not a boundary that held.
 
 **No required HTTP dependency.** Requests go through `urllib` in a worker
 thread. It keeps the install trivial and avoids version conflicts with the

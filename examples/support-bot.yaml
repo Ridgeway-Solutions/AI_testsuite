@@ -1,7 +1,7 @@
 # Suite for the worked example. Uses the offline mock so it runs anywhere;
 # swap the target block for your real endpoint.
 #
-#   redteam run examples/support-bot.yaml
+#   llmtest run examples/support-bot.yaml
 
 name: acme-support-bot
 description: Policy-specific scan for the Acme support assistant

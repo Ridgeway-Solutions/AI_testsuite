@@ -13,7 +13,7 @@ def build(result: RunResult) -> dict[str, Any]:
     board = result.scoreboard()
     outcomes = objective_outcomes(board, result.objectives, result.broken_objectives)
     return {
-        "schema": "redteam-suite/run/1",
+        "schema": "llm-testsuite/run/1",
         "suite": {
             "name": result.config.name,
             "description": result.config.description,

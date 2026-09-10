@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from redteam.config import RunSettings, SuiteConfig, expand_env
+from llmtest.config import RunSettings, SuiteConfig, expand_env
 
 
 def test_env_references_are_expanded():

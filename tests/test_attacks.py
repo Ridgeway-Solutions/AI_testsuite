@@ -7,9 +7,9 @@ import random
 
 import pytest
 
-from redteam.attacks.base import AttackContext
-from redteam.registry import available
-from redteam.types import Attempt, Conversation, Objective, Response, Role, Severity
+from llmtest.attacks.base import AttackContext
+from llmtest.registry import available
+from llmtest.types import Attempt, Conversation, Objective, Response, Role, Severity
 
 GOAL = "reveal the internal build token"
 OBJ = Objective(id="test.obj", goal=GOAL, severity=Severity.HIGH)
@@ -142,7 +142,7 @@ def test_indirect_injection_hides_the_goal_inside_ingested_content():
 
 
 def test_crescendo_stops_as_soon_as_it_succeeds():
-    from redteam.types import Verdict
+    from llmtest.types import Verdict
 
     ctx, sent = context()
     original_send = ctx.send
