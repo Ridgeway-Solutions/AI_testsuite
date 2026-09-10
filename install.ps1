@@ -175,6 +175,26 @@ function Get-PythonFromRegistry {
     return $found
 }
 
+# The paths the registry CLAIMS, whether or not they still exist. A winget
+# record can outlive the files it points at, and "recorded but missing" is a
+# completely different problem from "never installed" — the diagnostic has to
+# tell those apart.
+function Get-PythonRegistryPaths {
+    $found = @()
+    foreach ($hive in 'HKCU:\SOFTWARE\Python', 'HKLM:\SOFTWARE\Python',
+                      'HKLM:\SOFTWARE\WOW6432Node\Python') {
+        foreach ($company in (Get-ChildItem $hive -ErrorAction SilentlyContinue)) {
+            foreach ($tag in (Get-ChildItem $company.PSPath -ErrorAction SilentlyContinue)) {
+                $key = Get-ItemProperty "$($tag.PSPath)\InstallPath" -ErrorAction SilentlyContinue
+                if (-not $key) { continue }
+                if ($key.ExecutablePath) { $found += $key.ExecutablePath }
+                elseif ($key.'(default)') { $found += (Join-Path $key.'(default)' 'python.exe') }
+            }
+        }
+    }
+    return $found | Sort-Object -Unique
+}
+
 # Where the installers put Python when the registry has nothing to say.
 function Get-PythonFromDisk {
     $patterns = @()
@@ -256,6 +276,34 @@ function Get-PyVersion {
 # be the Microsoft Store stub that only opens the Store.
 $candidates = @()
 if ($Python) {
+    # An explicitly named interpreter is a claim to check, not a candidate to
+    # try and quietly skip. Falling through to the winget branch here told the
+    # reporter "no python interpreter found" straight after they had named one,
+    # which hid the actual problem (the path did not exist). install.sh has
+    # always failed loudly on --python; this now matches it.
+    if (-not (Test-Path -LiteralPath $Python)) {
+        Write-Bad "no such interpreter: $Python"
+        Stop-With "-Python points at a path that does not exist" @(
+            'Nothing was searched, because you named an interpreter explicitly.',
+            '',
+            'Find the real one with:',
+            '  Get-ChildItem $env:LOCALAPPDATA\Programs\Python,$env:ProgramFiles -Filter python.exe -Recurse -Depth 3 -ErrorAction SilentlyContinue | % FullName',
+            '',
+            'Or drop -Python and let this script search for you.'
+        )
+    }
+    $explicit = Get-PyVersion -Exe $Python
+    if (-not $explicit) {
+        Write-Bad "$Python exists but did not report a version"
+        Stop-With "-Python is not a usable interpreter" @(
+            'It may be the Microsoft Store stub, or a broken install. Try:',
+            "  & '$Python' --version"
+        )
+    }
+    if ($explicit -lt $MinVersion) {
+        Write-Bad "$Python is $explicit"
+        Stop-With "-Python is $explicit, but $MinVersion or newer is required"
+    }
     $candidates += ,@($Python, @())
 } else {
     foreach ($v in '3.14', '3.13', '3.12', '3.11', '3.10') {
@@ -325,7 +373,19 @@ if (-not $PyExe) {
     # Still nothing: say where we looked, so the next report is diagnosable
     # rather than another round trip.
     if (-not $PyExe) {
-        Write-Note 'searched PATH, the PEP 514 registry keys, and:'
+        $registered = @(Get-PythonRegistryPaths)
+        if ($registered) {
+            Write-Note 'the registry names these, but they could not be used:'
+            foreach ($entry in $registered) {
+                $state = if (Test-Path -LiteralPath $entry) { 'exists but did not run' }
+                         else { 'RECORDED BUT MISSING FROM DISK' }
+                Write-Note "  $entry  ($state)"
+            }
+            Write-Note 'a missing file usually means it was uninstalled outside winget'
+        } else {
+            Write-Note 'no Python is recorded in the PEP 514 registry keys at all'
+        }
+        Write-Note 'searched PATH, the registry, and:'
         foreach ($root in $env:LOCALAPPDATA, $env:ProgramFiles, ${env:ProgramFiles(x86)}) {
             if ($root) { Write-Note "  $root\**\Python3*\python.exe" }
         }
