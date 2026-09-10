@@ -377,7 +377,7 @@ def test_the_windows_installer_does_not_trust_wingets_exit_code():
     assert "Get-PythonFromRegistry" in text
     assert "HKCU:\\SOFTWARE\\Python" in text and "HKLM:\\SOFTWARE\\Python" in text
     # And when it still finds nothing, it must say where it looked.
-    assert "searched PATH, the PEP 514 registry keys" in text
+    assert "searched PATH, the registry, and:" in text
 
 
 def test_the_windows_installer_offers_a_way_out_when_it_cannot_find_python():
@@ -385,6 +385,30 @@ def test_the_windows_installer_offers_a_way_out_when_it_cannot_find_python():
     text = INSTALL_PS1.read_text()
     assert "-Python " in text
     assert "Get-ChildItem" in text
+
+
+def test_the_windows_installer_fails_loudly_on_an_explicit_python():
+    # Reported: the user passed -Python with a path, and the script answered
+    # "no python interpreter found" and started installing — because the
+    # candidate loop uses Get-Command, which simply skips a path that does not
+    # exist. An interpreter the user named explicitly is a claim to check, not
+    # a candidate to silently drop. install.sh has always died here.
+    text = INSTALL_PS1.read_text()
+    assert "-Python points at a path that does not exist" in text
+    assert "Nothing was searched, because you named an interpreter explicitly" in text
+    # And the two other ways an explicit path can be wrong.
+    assert "-Python is not a usable interpreter" in text
+    assert "or newer is required" in text
+
+
+def test_the_windows_installer_distinguishes_missing_from_never_installed():
+    # A winget record can outlive the files it points at. "recorded but
+    # missing from disk" and "never installed" need different fixes, so the
+    # diagnostic has to tell them apart.
+    text = INSTALL_PS1.read_text()
+    assert "Get-PythonRegistryPaths" in text
+    assert "RECORDED BUT MISSING FROM DISK" in text
+    assert "no Python is recorded in the PEP 514 registry keys at all" in text
 
 
 PWSH = shutil.which("pwsh") or shutil.which("powershell")
@@ -430,3 +454,35 @@ def test_the_windows_installer_will_not_delete_a_non_venv(tmp_path):
     assert result.returncode != 0
     assert "not a virtual environment" in result.stdout
     assert (precious / "important.txt").read_text() == "keep me"
+
+
+@powershell_only
+def test_the_windows_installer_rejects_a_nonexistent_explicit_python(tmp_path):
+    missing = tmp_path / "Matthew James" / "Python312" / "python.exe"
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-File", str(INSTALL_PS1), "-Check",
+         "-Python", str(missing)],
+        cwd=ROOT, capture_output=True, text=True, timeout=300,
+    )
+    assert result.returncode != 0
+    assert "no such interpreter" in result.stdout
+    # It must NOT have gone off looking, or offered to install anything.
+    assert "no python interpreter found" not in result.stdout
+    assert "can be installed with" not in result.stdout
+
+
+@powershell_only
+def test_the_windows_installer_accepts_an_explicit_python_with_spaces(tmp_path):
+    # Windows home directories routinely contain a space.
+    spaced = tmp_path / "Matthew James" / "Python312"
+    spaced.mkdir(parents=True)
+    exe = spaced / ("python.exe" if sys.platform == "win32" else "python")
+    shutil.copy(sys.executable, exe)
+
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-File", str(INSTALL_PS1), "-Check",
+         "-Python", str(exe), "-Venv", str(tmp_path / "unused")],
+        cwd=ROOT, capture_output=True, text=True, timeout=300,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert str(exe) in result.stdout
