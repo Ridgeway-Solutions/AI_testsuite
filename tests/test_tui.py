@@ -450,11 +450,12 @@ class FakeScreen:
         pass
 
 
-def make_app(tmp_path, **target):
+def make_app(tmp_path, attacks=("direct",), rate_limit_rps=0.0, **target):
     config = SuiteConfig.from_dict(
         {"name": "t", "target": {"type": "mock", **target},
-         "attacks": ["direct"],
-         "objectives": {"include": ["canary.secret_token"]}}
+         "attacks": list(attacks),
+         "objectives": {"include": ["canary.secret_token"]},
+         "run": {"rate_limit_rps": rate_limit_rps}}
     )
     return app_module.App(FakeScreen(), config, tmp_path, ["json"])
 
@@ -530,9 +531,20 @@ def test_re_running_clears_the_previous_result(tmp_path):
 
 
 def test_a_run_will_not_start_twice(tmp_path):
-    app = make_app(tmp_path)
+    # Rate-limited so the run is certainly still in flight when the second
+    # start_run lands. Against the unthrottled mock it finishes in
+    # milliseconds, and this test then raced it: replacing a thread that has
+    # already exited is correct behaviour, so the assertion failed for a
+    # reason that had nothing to do with the guard being tested.
+    app = make_app(tmp_path, attacks=["direct", "obfuscation", "persona"],
+                   rate_limit_rps=2)
     app.start_run()
     thread = app.thread
+    assert thread.is_alive()
+
     app.start_run()
-    assert app.thread is thread
+    assert app.thread is thread  # the second call was a no-op
+
+    app.stop_run()
     thread.join(timeout=60)
+    assert not thread.is_alive()
