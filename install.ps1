@@ -127,6 +127,10 @@ function Install-WithConsent {
         return $false
     }
     Write-Host ''
+    # A package manager writing to stderr is not a reason to abort: as in
+    # Invoke-Py, Stop would make that a terminating error under Windows
+    # PowerShell. The exit code below is what decides.
+    $ErrorActionPreference = 'Continue'
     # Route the command's output to the host, not to the pipeline.
     #
     # A PowerShell function returns everything left on its output stream, so a
@@ -487,6 +491,13 @@ Write-Ok "$PyExe $($PyArgs -join ' ') ($PyVersion)"
 
 function Invoke-Py {
     param([string[]] $Arguments)
+    # Windows PowerShell turns a native command's stderr into a TERMINATING
+    # error while $ErrorActionPreference is Stop, so a python that merely
+    # printed a traceback - which is what a "is this module importable?" check
+    # does when the answer is no - killed the whole installer instead of
+    # answering the question. Assigning here is function-scoped: only this
+    # call loosens.
+    $ErrorActionPreference = 'Continue'
     & $PyExe @($PyArgs + $Arguments)
 }
 
@@ -570,6 +581,7 @@ if (-not $NoVenv) {
 
 function Invoke-VenvPy {
     param([string[]] $Arguments)
+    $ErrorActionPreference = 'Continue'   # as Invoke-Py, for the same reason
     if ($NoVenv) { Invoke-Py $Arguments } else { & $VenvPy @Arguments }
 }
 

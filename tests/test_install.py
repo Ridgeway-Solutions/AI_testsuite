@@ -606,3 +606,60 @@ def test_a_broken_interpreter_is_rejected_with_the_reason(tmp_path):
     # The point of the change: the message names what actually happened.
     assert "exit code 1" in output, output
     assert "init_fs_encoding" in output, output
+
+
+def ps1_functions():
+    """Each `function Name { ... }` in install.ps1, as name -> body."""
+    text = INSTALL_PS1.read_text()
+    functions, name, body = {}, None, []
+    for line in text.splitlines():
+        if line.startswith("function "):
+            name = line.split()[1]
+            body = []
+        elif name is not None and line == "}":
+            functions[name] = "\n".join(body)
+            name = None
+        elif name is not None:
+            body.append(line)
+    return functions
+
+
+def test_the_windows_installer_survives_a_command_that_writes_to_stderr():
+    # Caught by the new Windows PowerShell 5.1 CI leg, on its first ever run:
+    # 5.1 turns a native command's stderr into a TERMINATING error while
+    # $ErrorActionPreference is Stop. So `python -c "import curses"` — a
+    # question whose answer is a traceback when the module is absent — did not
+    # answer "no", it killed the installer:
+    #
+    #   py.exe : Traceback (most recent call last):
+    #   At install.ps1:490 char:5 + & $PyExe @($PyArgs + $Arguments)
+    #   + FullyQualifiedErrorId : NativeCommandError
+    #
+    # Every function that runs a native command must therefore loosen the
+    # preference for that call. The exit code is what decides; stderr is just
+    # output. pwsh does not do this, so only the 5.1 leg can prove it — this
+    # guard is what keeps the next native call from being added without it.
+    for name, body in ps1_functions().items():
+        if "& " not in body:
+            continue
+        assert "$ErrorActionPreference = 'Continue'" in body, (
+            f"{name} runs a native command without loosening "
+            f"$ErrorActionPreference; stderr from it will abort the installer "
+            f"under Windows PowerShell"
+        )
+
+
+def test_every_unredirected_python_call_checks_its_exit_code():
+    # The other half of the deal above: if stderr no longer stops the script,
+    # the exit code has to be what stops it.
+    lines = INSTALL_PS1.read_text().splitlines()
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped.startswith(("Invoke-Py @", "Invoke-VenvPy @")):
+            continue
+        if "2>" in stripped:
+            continue
+        following = "\n".join(lines[i + 1:i + 4])
+        assert "$LASTEXITCODE" in following or "$version" in stripped, (
+            f"line {i + 1} runs python without checking how it went: {stripped}"
+        )
