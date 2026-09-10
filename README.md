@@ -48,9 +48,48 @@ The catalogue includes a control objective where a refusal *is* the finding.
 
 ```bash
 git clone https://github.com/Ridgeway-Solutions/AI_testsuite && cd AI_testsuite
+./install.sh            # Windows: powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+The installer checks your Python, installs what is missing into a `.venv`, and
+then proves the result works before telling you it did. It is safe to re-run.
+
+```
+  ✓ python3.12 (3.12.7) at /usr/bin/python3.12
+  ✓ venv module
+  ✓ curses (terminal UI available)
+  ✓ llm-testsuite installed (editable)
+  ✓ end-to-end check passed (registry, target and suite all load)
+```
+
+| Flag | |
+|---|---|
+| `--check` | report what is missing and change nothing |
+| `--dev` | also install the test dependencies |
+| `--venv DIR` | somewhere other than `./.venv` |
+| `--no-venv` | into the interpreter you are already using |
+| `--python PATH` | pick a specific interpreter |
+
+Then `. .venv/bin/activate` (`.\.venv\Scripts\Activate.ps1` on Windows).
+
+It never runs a package manager under sudo for you: where something needs root
+— `python3-venv` on Debian and Ubuntu is the usual one — it names the exact
+command and stops.
+
+<details>
+<summary>Or install it by hand</summary>
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate
 pip install -e .
 llmtest --version
 ```
+
+If `pip` refuses with `externally-managed-environment`, that is your system
+Python protecting itself (PEP 668) — the venv above is the fix. On Windows,
+`pip install windows-curses` as well if you want the terminal UI.
+
+</details>
 
 Python 3.10+. One runtime dependency (PyYAML); HTTP goes through the standard
 library, so there is nothing to pin against your app's environment.

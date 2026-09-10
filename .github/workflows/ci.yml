@@ -20,6 +20,36 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: pytest -q
 
+  install:
+    # The installer is the first thing a new user runs, and nothing else in the
+    # suite would notice if it broke. Run it for real on both platforms — macOS
+    # ships a different sh and a Homebrew python layout.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: --check changes nothing
+        run: |
+          ./install.sh --check
+          test ! -d .venv || (echo "--check created a venv"; exit 1)
+
+      - name: install for real
+        run: ./install.sh --dev
+
+      - name: the installed environment works
+        run: |
+          .venv/bin/llmtest --version
+          .venv/bin/llmtest plan suites/quick.yaml
+          .venv/bin/llmtest run suites/quick.yaml --out runs/install --quiet
+          .venv/bin/python -m pytest -q
+
+      - name: re-running is safe
+        run: ./install.sh
+
   self-scan:
     # Runs the suite end to end against the offline mock: no credentials, no
     # network, no spend. Catches breakage the unit tests would not.
