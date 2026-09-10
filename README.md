@@ -62,19 +62,37 @@ then proves the result works before telling you it did. It is safe to re-run.
   ✓ end-to-end check passed (registry, target and suite all load)
 ```
 
+When something is missing that pip cannot supply — `python3-venv` on Debian and
+Ubuntu is the usual one — it shows you the exact command, asks, and runs it only
+if you say yes:
+
+```
+  ✗ venv module (python3-venv is packaged separately on Debian/Ubuntu)
+
+  The missing module(s) venv ensurepip can be installed with:
+
+      sudo apt-get update && sudo apt-get install -y python3.12-venv python3-pip
+    this needs root, so sudo will prompt for your password
+
+  Run it now? [y/N]
+```
+
+Nothing is installed without an answer. The command shown is the command that
+runs, pressing Enter means no, and with no terminal to ask on (a pipe, CI) it
+prints the command and stops instead of assuming consent — pass `--yes` for
+unattended runs. apt, dnf, yum, pacman, zypper, apk and brew are recognised.
+
 | Flag | |
 |---|---|
 | `--check` | report what is missing and change nothing |
 | `--dev` | also install the test dependencies |
+| `--yes` | answer yes to every prompt (unattended, CI) |
+| `--no-install-deps` | never touch system packages, just report |
 | `--venv DIR` | somewhere other than `./.venv` |
 | `--no-venv` | into the interpreter you are already using |
 | `--python PATH` | pick a specific interpreter |
 
 Then `. .venv/bin/activate` (`.\.venv\Scripts\Activate.ps1` on Windows).
-
-It never runs a package manager under sudo for you: where something needs root
-— `python3-venv` on Debian and Ubuntu is the usual one — it names the exact
-command and stops.
 
 <details>
 <summary>Or install it by hand</summary>
@@ -379,7 +397,7 @@ Worth being clear about what a green run does not mean:
 
 ```bash
 pip install -e ".[dev]"
-pytest                                   # 300+ tests, no network required
+pytest                                   # 335+ tests, no network required
 llmtest run suites/full.yaml --quiet     # offline end-to-end against the mock
 ```
 

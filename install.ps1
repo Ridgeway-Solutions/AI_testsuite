@@ -30,6 +30,12 @@
 .PARAMETER Python
     Path to a specific interpreter to use.
 
+.PARAMETER Yes
+    Answer yes to every prompt. Needed for unattended and CI runs.
+
+.PARAMETER NoInstallDeps
+    Never install anything system-wide; report what is missing instead.
+
 .EXAMPLE
     .\install.ps1
 .EXAMPLE
@@ -44,7 +50,9 @@ param(
     [switch] $NoVenv,
     [switch] $Dev,
     [switch] $Check,
-    [string] $Python
+    [string] $Python,
+    [switch] $Yes,
+    [switch] $NoInstallDeps
 )
 
 $ErrorActionPreference = 'Stop'
@@ -62,6 +70,59 @@ function Stop-With {
     Write-Host "error: $Message" -ForegroundColor Red
     foreach ($line in $Detail) { Write-Host "  $line" }
     exit 1
+}
+
+# Ask before installing anything system-wide. Fails closed: with no console to
+# ask on (CI, a non-interactive host) this returns $false rather than assuming
+# consent, unless -Yes was given.
+$script:CouldNotAsk = $false
+function Confirm-Action {
+    param([string] $Question)
+    $script:CouldNotAsk = $false
+    if ($Yes) {
+        Write-Note '(-Yes given)'
+        return $true
+    }
+    if ([Console]::IsInputRedirected -or -not $Host.UI.RawUI) {
+        $script:CouldNotAsk = $true
+        return $false
+    }
+    try {
+        $reply = Read-Host "`n  $Question [y/N]"
+    } catch {
+        $script:CouldNotAsk = $true
+        return $false
+    }
+    return $reply -match '^(y|yes)$'
+}
+
+# Shows the exact command, asks, then runs that same string. Building the
+# displayed and executed commands separately would let the prompt describe
+# something other than what runs.
+function Install-WithConsent {
+    param([string] $What, [string] $Command)
+    if ($NoInstallDeps) {
+        Write-Note "-NoInstallDeps given, so not offering to install $What"
+        return $false
+    }
+    Write-Host "`n  $What can be installed with:`n"
+    Write-Host "      $Command" -ForegroundColor White
+    if (-not (Confirm-Action 'Run it now?')) {
+        if ($script:CouldNotAsk) {
+            Write-Warn 'no console to ask on - nothing was installed'
+            Write-Note 're-run with -Yes to install without being asked'
+        } else {
+            Write-Warn 'declined - nothing was installed'
+        }
+        return $false
+    }
+    Write-Host ''
+    & cmd /c $Command
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn 'that command failed'
+        return $false
+    }
+    return $true
 }
 
 # Run from the repository root whatever directory the user invoked us from.
@@ -132,7 +193,33 @@ foreach ($candidate in $candidates) {
 if (-not $PyExe) {
     if ($TooOld) { Write-Bad "found $TooOld - too old" }
     else { Write-Bad 'no python interpreter found' }
-    Stop-With "Python $MinVersion+ is required and cannot be installed safely from here" @(
+
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        if (Install-WithConsent 'Python 3.12' 'winget install -e --id Python.Python.3.12') {
+            Write-Note 'winget updates PATH for new shells only'
+            # Re-run the same search rather than assuming what landed where.
+            foreach ($candidate in $candidates) {
+                $exe, $prefix = $candidate
+                if (-not (Get-Command $exe -ErrorAction SilentlyContinue)) { continue }
+                $version = Get-PyVersion -Exe $exe -Prefix $prefix
+                if ($version -and $version -ge $MinVersion) {
+                    $PyExe = $exe; $PyArgs = $prefix; $PyVersion = $version
+                    break
+                }
+            }
+            if (-not $PyExe) {
+                Stop-With 'Python installed, but not visible in this shell yet' @(
+                    'Close this window, open a new one, and re-run .\install.ps1'
+                )
+            }
+        }
+    } else {
+        Write-Note 'winget is not available to install it automatically'
+    }
+}
+
+if (-not $PyExe) {
+    Stop-With "Python $MinVersion+ is required" @(
         'Install it, then re-run this script:',
         '',
         '  winget install Python.Python.3.12',
