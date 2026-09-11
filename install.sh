@@ -546,12 +546,20 @@ else
 fi
 
 if [ "$CURSES" -eq 1 ]; then
-    printf '    %sllmtest tui suites/quick.yaml%s   the terminal UI, offline mock\n' "$BOLD" "$OFF"
+    printf '    %sllmtest tui%s\n\n' "$BOLD" "$OFF"
+    printf 'then point it at your own endpoint from inside it:\n\n'
+    printf '    %s:target https://your-app.example/api/chat%s\n' "$BOLD" "$OFF"
+    printf '    %s:response-path data.reply%s   where the reply sits in the JSON\n' "$BOLD" "$OFF"
+    printf '    %s:test%s                       one benign request, to prove it answers\n' "$BOLD" "$OFF"
+    printf '    %s:run%s                        %s:help lists the rest%s\n\n' \
+        "$BOLD" "$OFF" "$DIM" "$OFF"
+    printf 'Or without activating anything:  %s%s tui%s\n\n' "$DIM" "$LLMTEST" "$OFF"
+else
+    printf '    %sllmtest run --target-type http --url https://your-app.example/api/chat%s\n' \
+        "$BOLD" "$OFF"
+    printf '    %sllmtest --help%s\n\n' "$BOLD" "$OFF"
 fi
-printf '    %sllmtest run suites/quick.yaml%s   the plain CLI, offline mock\n' "$BOLD" "$OFF"
-printf '    %sllmtest --help%s\n\n' "$BOLD" "$OFF"
-printf 'Or without activating anything:\n\n    %s%s tui suites/quick.yaml%s\n\n' \
-    "$DIM" "$LLMTEST" "$OFF"
-printf '%sBoth commands above run against a built-in offline mock: no credentials,\n' "$DIM"
-printf 'no network, no spend. Only run against a real system you own or have\n'
-printf 'written permission to test — see docs/ETHICS.md.%s\n' "$OFF"
+printf '%sThe shipped suites (suites/quick.yaml and friends) aim at a built-in\n' "$DIM"
+printf 'offline mock: they prove this works and nothing about your system.\n'
+printf 'Only run against a real system you own or have written permission to\n'
+printf 'test — see docs/ETHICS.md.%s\n' "$OFF"

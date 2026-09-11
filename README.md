@@ -120,31 +120,73 @@ library, so there is nothing to pin against your app's environment.
 
 ## Quickstart
 
-Everything works offline against a built-in mock application, so you can see the
-whole pipeline before pointing it at anything real:
+Open the UI and point it at your own endpoint. No suite file, no editing:
+
+```bash
+llmtest tui
+```
+
+```
+:target https://my-app.internal/api/chat
+:response-path data.reply        where the reply sits in the JSON it returns
+:auth APP_TOKEN                  names the variable holding the token, not the token
+:test                            one benign request, so a typo costs seconds
+:run
+```
+
+`:help` lists every command. `:save-suite myapp.yaml` writes what you just typed
+out as a file you can re-run or commit.
+
+Prefer flags? The same thing without the UI:
+
+```bash
+llmtest run --target-type http --url https://my-app.internal/api/chat \
+            --attacks all --rate-limit 2 --fail-on high
+```
+
+Everything also works offline against a built-in mock, which is what the shipped
+suites point at — useful for seeing the pipeline, and evidence of nothing about
+your system:
 
 ```bash
 llmtest list attacks              # the technique library
 llmtest plan suites/full.yaml     # what would run, and what would be skipped
 llmtest run suites/full.yaml      # ~500 requests against the offline mock
-llmtest tui suites/full.yaml      # the same run, in a terminal UI
-```
-
-Then scaffold a suite for your own application:
-
-```bash
-llmtest init myapp.yaml
-$EDITOR myapp.yaml                # describe your endpoint
-llmtest plan myapp.yaml           # confirm the shape before spending anything
-llmtest run myapp.yaml --rate-limit 2 --fail-on high
 ```
 
 ## The terminal UI
 
 `llmtest tui` drives a scan from a full-screen terminal and is the fastest way
 to read one. It opens on a setup screen showing what the run will cost — pairs,
-objectives, and what will be skipped and why — and sends nothing until you press
-`r`.
+objectives, and what will be skipped and why — and sends nothing until you say
+so.
+
+Press `:` for the command line. This is how you aim it at something without
+writing YAML first:
+
+| | |
+|---|---|
+| `:target https://my-app/api/chat` | your own endpoint |
+| `:target openai gpt-4o-mini` | any OpenAI-compatible API |
+| `:target anthropic claude-sonnet-5` | Claude |
+| `:target shell ./my-cli` | a local command that takes the prompt on stdin |
+| `:field messages` | the JSON key carrying the prompt (`messages` sends a chat array) |
+| `:response-path data.reply` | where the reply sits in the JSON coming back |
+| `:auth APP_TOKEN` | the **variable name** holding the token — never the token |
+| `:header x-api-key ${APP_KEY}` | anything else your endpoint needs |
+| `:system ...` | a system prompt to deploy with, with a canary planted in it |
+| `:attacks all` · `:category confidentiality` · `:rate 2` | shape the run |
+| `:test` | one benign request, and what came back |
+| `:run` · `:stop` · `:save` | run it, wind it down, write the reports |
+| `:save-suite myapp.yaml` | write this setup out as a file you can re-run |
+
+`:test` is worth the two seconds: if the reply is not where you said it was, it
+tells you which keys the endpoint actually returned, so the next command fixes
+it rather than a scan of several hundred failed requests.
+
+`:system` plants a canary — a token the harness generates — inside the prompt it
+sends, because "does it leak its instructions?" can only be judged against a
+secret we know. Your own secrets stay yours; nothing asks you to type one in.
 
 ```
  quick → mock (mock)
@@ -177,6 +219,11 @@ completion, for the same reason the reports distinguish `NOT RUN` from `PASS`.
 
 `x` winds a run down early and keeps the coverage it already has; reports are
 still written. `r` re-runs, `s` rewrites the reports, `?` lists the keys.
+
+A run that sent nothing is never reported as a pass. If every pair was skipped —
+or every request errored — the grade is **untested**, not "strong": an all-clear
+for a system that was never asked anything is the most dangerous thing this tool
+could say.
 
 The UI is a front end for exactly the same `Runner`, so `llmtest tui` accepts
 every target and filter flag `llmtest run` does, and writes the same

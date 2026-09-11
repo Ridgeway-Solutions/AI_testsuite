@@ -662,13 +662,24 @@ if (-not $NoVenv) {
 }
 Write-Host ''
 if ($HasCurses) {
-    Write-Host '    llmtest tui suites/quick.yaml' -ForegroundColor White -NoNewline
-    Write-Host '   the terminal UI, offline mock'
+    Write-Host '    llmtest tui' -ForegroundColor White
+    Write-Host ''
+    Write-Host 'then point it at your own endpoint from inside it:'
+    Write-Host ''
+    Write-Host '    :target https://your-app.example/api/chat' -ForegroundColor White
+    Write-Host '    :response-path data.reply' -ForegroundColor White -NoNewline
+    Write-Host '   where the reply sits in the JSON'
+    Write-Host '    :test' -ForegroundColor White -NoNewline
+    Write-Host '                       one benign request, to prove it answers'
+    Write-Host '    :run' -ForegroundColor White -NoNewline
+    Write-Host '                        :help lists the rest'
+} else {
+    Write-Host '    llmtest run --target-type http --url https://your-app.example/api/chat' `
+        -ForegroundColor White
+    Write-Host '    llmtest --help'
 }
-Write-Host '    llmtest run suites/quick.yaml' -ForegroundColor White -NoNewline
-Write-Host '   the plain CLI, offline mock'
-Write-Host '    llmtest --help'
 Write-Host ''
-Write-Note 'Both commands run against a built-in offline mock: no credentials, no'
-Write-Note 'network, no spend. Only run against a real system you own or have'
-Write-Note "written permission to test - see $(if ($OnWindows) {'docs\ETHICS.md'} else {'docs/ETHICS.md'})."
+Write-Note 'The shipped suites (suites/quick.yaml and friends) aim at a built-in'
+Write-Note 'offline mock: they prove this works and nothing about your system.'
+Write-Note 'Only run against a real system you own or have written permission to'
+Write-Note "test - see $(if ($OnWindows) {'docs\ETHICS.md'} else {'docs/ETHICS.md'})."
