@@ -95,6 +95,46 @@ jobs:
         shell: pwsh
         run: ./install.ps1
 
+  install-windows-powershell:
+    # The one PowerShell that actually matters and was never tested: 5.1 is
+    # what `powershell -ExecutionPolicy Bypass -File .\install.ps1` starts,
+    # which is what install.ps1's own header tells people to run. It passes
+    # native-command arguments differently from pwsh 7 — a quoted -c payload
+    # reached python with its quotes stripped — so an installer that only ever
+    # ran under pwsh was never covered where its users run it.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: it parses under Windows PowerShell
+        shell: powershell
+        run: |
+          $errs = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path ./install.ps1).Path, [ref]$null, [ref]$errs) | Out-Null
+          if ($errs) { $errs | ForEach-Object { $_.Message }; throw 'parse errors' }
+
+      - name: it finds the runner's Python
+        shell: powershell
+        run: |
+          $out = ./install.ps1 -Check | Out-String
+          Write-Host $out
+          if ($out -match 'no python interpreter found') { throw 'the probe missed a Python that is installed' }
+          if ($out -match 'did not report a version') { throw 'the probe could not run an installed Python' }
+          if (Test-Path .venv) { throw '-Check created a venv' }
+
+      - name: install for real
+        shell: powershell
+        run: ./install.ps1 -Dev
+
+      - name: the installed environment works
+        shell: powershell
+        run: |
+          & .venv\Scripts\python.exe -m llmtest --version
+          if ($LASTEXITCODE -ne 0) { throw 'llmtest --version failed' }
+          & .venv\Scripts\python.exe -m pytest -q
+          if ($LASTEXITCODE -ne 0) { throw 'pytest failed' }
+
   self-scan:
     # Runs the suite end to end against the offline mock: no credentials, no
     # network, no spend. Catches breakage the unit tests would not.

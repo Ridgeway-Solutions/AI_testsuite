@@ -500,3 +500,166 @@ def test_a_spaced_explicit_python_path_is_found_not_mangled(tmp_path):
     # And an explicit -Python never wanders off into the search or winget.
     assert "no python interpreter found" not in output, output
     assert "can be installed with" not in output, output
+
+
+def test_the_windows_installer_never_quotes_a_python_payload():
+    # The bug this guards against, reported from a real Windows run: the
+    # version probe ran
+    #     -c "import sys; print("%d.%d.%d" % sys.version_info[:3])"
+    # Windows PowerShell 5.1 — which is what `powershell -File .\install.ps1`
+    # starts, and what install.ps1's own header tells people to run — passes
+    # an argument's embedded double quotes to a native command unescaped, so
+    # python got a broken payload and exited non-zero. EVERY interpreter on
+    # the machine was rejected: a working 3.12 and 3.14 were both found in the
+    # registry and both dismissed, and the user was offered winget instead.
+    # pwsh 7.3+ escapes it correctly, which is why CI never saw it.
+    text = INSTALL_PS1.read_text()
+    for line in text.splitlines():
+        if "'-c'" not in line or line.strip().startswith("#"):
+            continue
+        payload = line.split("'-c',", 1)[1]
+        # At most the pair that delimits the PowerShell string itself. The
+        # broken payload carried four: the two that PowerShell 5.1 dropped
+        # were the ones inside it.
+        assert payload.count('"') <= 2, (
+            f"a -c payload must not carry embedded double quotes: {line.strip()}"
+        )
+    # The probe asks the one question that needs no quoting at all.
+    assert "@('--version')" in text
+
+
+def test_the_windows_installer_says_why_an_interpreter_was_rejected():
+    # "exists but did not run" was true and useless: it could not distinguish
+    # a broken install from a broken probe, and it was the probe. Every
+    # rejection now carries the exit code and what the interpreter said.
+    text = INSTALL_PS1.read_text()
+    assert "ProbeNotes" in text
+    assert "exists but did not run" not in text
+    assert "on disk, but " in text
+    assert "also tried, and why each was rejected:" in text
+
+
+# A fake interpreter per failure shape. Nothing real is run: each one answers
+# only the question named, so the probe's behaviour is what is under test.
+FAKE_PYTHONS = {
+    # Answers --version; fails every -c, the way python does when its payload
+    # arrives with the quotes stripped out of it.
+    "version-only": (
+        '#!/bin/sh\ncase "$1" in\n'
+        '  --version) echo "Python 3.12.7"; exit 0 ;;\n'
+        "  -c) echo 'SyntaxError: invalid syntax' >&2; exit 1 ;;\nesac\nexit 0\n",
+        '@echo off\r\nif "%~1"=="--version" (echo Python 3.12.7& exit /b 0)\r\n'
+        "echo SyntaxError: invalid syntax 1>&2\r\nexit /b 1\r\n",
+    ),
+    # The mirror image, in case a launcher ever swallows --version.
+    "c-only": (
+        '#!/bin/sh\ncase "$1" in\n'
+        '  --version) echo "unknown option" >&2; exit 2 ;;\n'
+        '  -c) echo "3.12.7"; exit 0 ;;\nesac\nexit 0\n',
+        '@echo off\r\nif "%~1"=="-c" (echo 3.12.7& exit /b 0)\r\n'
+        "echo unknown option 1>&2\r\nexit /b 2\r\n",
+    ),
+    # Neither: a genuinely broken install.
+    "broken": (
+        "#!/bin/sh\necho 'Fatal Python error: init_fs_encoding' >&2\nexit 1\n",
+        "@echo off\r\necho Fatal Python error: init_fs_encoding 1>&2\r\nexit /b 1\r\n",
+    ),
+}
+
+
+def write_fake_python(directory, shape):
+    posix, batch = FAKE_PYTHONS[shape]
+    if sys.platform == "win32":
+        path = directory / f"{shape}.cmd"
+        path.write_text(batch)
+    else:
+        path = directory / shape
+        path.write_text(posix)
+        path.chmod(0o755)
+    return path
+
+
+def run_ps1_check(python, tmp_path):
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-File", str(INSTALL_PS1), "-Check",
+         "-Python", str(python), "-Venv", str(tmp_path / "unused")],
+        cwd=ROOT, capture_output=True, text=True, timeout=300,
+    )
+    return result.stdout + result.stderr
+
+
+@powershell_only
+@pytest.mark.parametrize("shape", ["version-only", "c-only"])
+def test_an_interpreter_is_accepted_if_it_answers_either_question(shape, tmp_path):
+    # The reporter's machine failed on the first of these: two real
+    # interpreters, both of which would answer --version, both rejected.
+    output = run_ps1_check(write_fake_python(tmp_path, shape), tmp_path)
+    assert "3.12.7" in output, output
+    assert "did not report a version" not in output, output
+    assert "no python interpreter found" not in output, output
+
+
+@powershell_only
+def test_a_broken_interpreter_is_rejected_with_the_reason(tmp_path):
+    output = run_ps1_check(write_fake_python(tmp_path, "broken"), tmp_path)
+    assert "did not report a version" in output, output
+    # The point of the change: the message names what actually happened.
+    assert "exit code 1" in output, output
+    assert "init_fs_encoding" in output, output
+
+
+def ps1_functions():
+    """Each `function Name { ... }` in install.ps1, as name -> body."""
+    text = INSTALL_PS1.read_text()
+    functions, name, body = {}, None, []
+    for line in text.splitlines():
+        if line.startswith("function "):
+            name = line.split()[1]
+            body = []
+        elif name is not None and line == "}":
+            functions[name] = "\n".join(body)
+            name = None
+        elif name is not None:
+            body.append(line)
+    return functions
+
+
+def test_the_windows_installer_survives_a_command_that_writes_to_stderr():
+    # Caught by the new Windows PowerShell 5.1 CI leg, on its first ever run:
+    # 5.1 turns a native command's stderr into a TERMINATING error while
+    # $ErrorActionPreference is Stop. So `python -c "import curses"` — a
+    # question whose answer is a traceback when the module is absent — did not
+    # answer "no", it killed the installer:
+    #
+    #   py.exe : Traceback (most recent call last):
+    #   At install.ps1:490 char:5 + & $PyExe @($PyArgs + $Arguments)
+    #   + FullyQualifiedErrorId : NativeCommandError
+    #
+    # Every function that runs a native command must therefore loosen the
+    # preference for that call. The exit code is what decides; stderr is just
+    # output. pwsh does not do this, so only the 5.1 leg can prove it — this
+    # guard is what keeps the next native call from being added without it.
+    for name, body in ps1_functions().items():
+        if "& " not in body:
+            continue
+        assert "$ErrorActionPreference = 'Continue'" in body, (
+            f"{name} runs a native command without loosening "
+            f"$ErrorActionPreference; stderr from it will abort the installer "
+            f"under Windows PowerShell"
+        )
+
+
+def test_every_unredirected_python_call_checks_its_exit_code():
+    # The other half of the deal above: if stderr no longer stops the script,
+    # the exit code has to be what stops it.
+    lines = INSTALL_PS1.read_text().splitlines()
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped.startswith(("Invoke-Py @", "Invoke-VenvPy @")):
+            continue
+        if "2>" in stripped:
+            continue
+        following = "\n".join(lines[i + 1:i + 4])
+        assert "$LASTEXITCODE" in following or "$version" in stripped, (
+            f"line {i + 1} runs python without checking how it went: {stripped}"
+        )
