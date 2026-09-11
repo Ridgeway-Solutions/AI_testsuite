@@ -21,7 +21,7 @@ from .config import SuiteConfig
 from .objectives import filter_objectives, load_objectives
 from .registry import available, load_plugins
 from .report import write_reports
-from .runner import Runner, RunResult, build_target, select_attacks
+from .runner import Runner, RunResult, build_target, select_attacks, Skip
 from .scoring import Outcome, objective_outcomes
 from .types import Severity
 
@@ -114,6 +114,22 @@ def _config_from_args(args: argparse.Namespace) -> SuiteConfig:
     return config
 
 
+def _nothing_to_run(skips: list[Skip]) -> str:
+    """Why a plan came out empty, and what to do about it."""
+    lines = ["", "error: nothing to run — every pair was skipped, so nothing "
+                 "was tested"]
+    reasons: dict[str, int] = {}
+    for skip in skips:
+        reasons[skip.reason] = reasons.get(skip.reason, 0) + 1
+    for reason, count in sorted(reasons.items(), key=lambda kv: -kv[1]):
+        lines.append(f"  {count}× {reason}")
+    lines.append("")
+    lines.append("  Widen it with --attacks all, drop --only/--category, or give "
+                 "the target")
+    lines.append("  the capability the objectives need. No report was written.")
+    return "\n".join(lines)
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     config = _config_from_args(args)
     if not args.quiet:
@@ -125,6 +141,16 @@ def cmd_run(args: argparse.Namespace) -> int:
         on_event=_progress(args.quiet),
         stream_path=outdir / "attempts.jsonl",
     )
+
+    # A plan that skipped everything must not be reported as a clean run. An
+    # empty scan used to print "Risk score 0.0/100 (strong)" and exit 0 — an
+    # all-clear for a system that was never sent a single payload, which is the
+    # most dangerous thing this tool could say.
+    pairs, skips = runner.plan()
+    if not pairs:
+        print(_nothing_to_run(skips), file=sys.stderr)
+        return 2
+
     result: RunResult = asyncio.run(runner.run())
 
     formats = [f.strip() for f in args.format.split(",") if f.strip()]
@@ -297,6 +323,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     path.write_text(TEMPLATE.format(name=args.name or path.stem))
     print(f"wrote {path}")
     print("next: edit the target block, then `llmtest plan " + str(path) + "`")
+    print("or skip the file entirely: `llmtest tui`, then :target <your url>")
     return 0
 
 
@@ -347,7 +374,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--quiet", action="store_true")
     run.set_defaults(func=cmd_run)
 
-    tui = sub.add_parser("tui", help="drive a run from a full-screen terminal UI")
+    tui = sub.add_parser(
+        "tui",
+        help="drive a run from a full-screen terminal UI; press : inside it to "
+             "point the scan at your own endpoint (no suite file needed)",
+    )
     add_target_flags(tui)
     tui.add_argument("--out", default="runs/latest", help="output directory")
     tui.add_argument("--format", default="md,json,html", help="report formats")
