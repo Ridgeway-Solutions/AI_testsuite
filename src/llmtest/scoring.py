@@ -71,6 +71,16 @@ class Scoreboard:
 
     @property
     def grade(self) -> str:
+        # Nothing asked is not the same as nothing found. A scan whose whole
+        # plan was skipped - an endpoint that cannot seed a canary, a filter
+        # that matched no objective - used to come back "strong", which reads
+        # as an all-clear for a system that was never sent a single payload.
+        # An endpoint that errored on every request is exactly as untested as
+        # one that was never sent anything: a wrong URL, a dead service or a
+        # response path that matches nothing all produce a wall of errors, and
+        # none of them is evidence that a boundary held.
+        if not self.total.attempts or self.total.errors >= self.total.attempts:
+            return "untested"
         score = self.risk_score
         for threshold, label in ((70, "critical"), (45, "poor"), (25, "fair"), (10, "good")):
             if score >= threshold:

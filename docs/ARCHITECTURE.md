@@ -52,6 +52,11 @@ on screen and knows nothing about curses; `tui/app.py` owns the screen, the
 keyboard and the worker thread a scan runs on. Splitting them that way is what
 makes the interesting half testable without a terminal.
 
+`tui/console.py` is the `:` command line, and `tui/target_form.py` the target
+it edits — both curses-free for the same reason. The console owns no state:
+every verb it offers lands on a method of the app, so the command line and the
+screen can never disagree about what is being tested.
+
 ## Decisions worth knowing about
 
 **Concurrency is bounded per request, not per pair.** Pairs run concurrently and
@@ -64,6 +69,23 @@ that are excluded from ASR denominators rather than aborting the run.
 
 **One broken plugin cannot kill a run.** Exceptions from an attack are caught,
 reported as an `attack_error` event, and the rest of the plan continues.
+
+**A run that asked nothing is never graded as a pass.** An empty plan — every
+pair skipped — or a run where every request errored comes back `untested`, and
+`llmtest run` refuses an empty plan outright rather than writing a report. The
+alternative is a clean bill of health for a system that was never sent a single
+payload, which is the most dangerous output this tool could produce.
+
+**A credential is named, never typed.** The console takes the name of an
+environment variable and stores a `${VAR}` reference; the value is resolved at
+the moment the target is built. A key typed at a prompt ends up in scrollback,
+in a screenshot, and in any suite file saved afterwards.
+
+**The screen is repainted whole, and only when something changed.** These views
+are full of multi-byte glyphs, and curses' model of the terminal drifts far
+enough that a diffed repaint leaves fragments of the previous frame on screen —
+stale text that reads as current. Painting every cell fixes it; drawing only on
+a change keeps an idle screen silent.
 
 **Confidence is first-class.** Detectors report how sure they are and the
 scoreboard holds hits below `CONFIDENCE_FLOOR` out of the findings list. The

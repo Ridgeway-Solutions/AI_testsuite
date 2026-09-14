@@ -229,6 +229,16 @@ class TuiState:
             self.scroll[view] = 0
         self.phase = Phase.RUNNING
 
+    def set_plan(self, target_label: str, pairs: int, skips: Iterable[Skip]) -> None:
+        """Re-cost the run after the target was changed from the command line.
+
+        Planning sends nothing, so this is safe to do on every edit — the
+        pair count on screen always describes the target as it stands now.
+        """
+        self.target_label = target_label
+        self.total_pairs = pairs
+        self.skips = list(skips)
+
     @property
     def progress(self) -> float:
         if not self.total_pairs:
